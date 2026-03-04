@@ -23,6 +23,9 @@ import time
 import getpass
 from pathlib import Path
 
+import tempfile
+import uuid
+
 # this all just to get the paths correct for the imports
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,6 +69,7 @@ class WebDriverManager:
         self.options.page_load_strategy = 'normal'
         self.options.add_argument("--start-maximized")
         self.options.add_argument("user-data-dir=/tmp/storedLoginInformation")  
+        
 
         # Add these lines to disable GCM/push notifications
         self.options.add_argument("--disable-background-networking")
@@ -77,8 +81,14 @@ class WebDriverManager:
         self.options.add_argument("--disable-logging")
         self.options.add_argument("--log-level=3")  # Only fatal errors
 
+        # NEW: Disable bounce tracking protection
+        self.options.add_argument('--disable-blink-features=AutomationControlled')
+        self.options.add_argument('--disable-features=BounceTrackingMitigations')
+        self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        self.options.add_experimental_option('useAutomationExtension', False)
+
         prefs = {'download.prompt_for_download': False}
-        self.options.add_experimental_option('prefs', prefs)     
+        self.options.add_experimental_option('prefs', prefs)   
     
     def start_driver(self):
         if not self.driver:
@@ -163,6 +173,7 @@ class Login:
         
         #loggedin_home = "https://login.ezproxy.library.tufts.edu/login?auth=tufts&url=http://www.nexisuni.com"
         loggedin_home = 'https://login.libdata.lib.ua.edu/login?qurl=http%3a%2f%2fwww.nexisuni.com'
+        #loggedin_home = 'https://advance.lexis.com/bisnexishome?crid=d3501b72-d1a7-4238-a3de-5734b95dd81b&pdmfid=1519360&pdisurlapi=true'
         #loggedin_home = 'https://advance-lexis-com.libdata.lib.ua.edu/bisnexishome/'
         self.driver.get(self.url or loggedin_home)
         time.sleep(5)
