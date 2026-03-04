@@ -18,7 +18,7 @@ Setup documentation in Box
 requirements.txt contains the packages and libraries needed to run the script
 
 ## Installation and Running
-How to download https://oregonstate.box.com/s/dzdijzw7glxo63niarajqg0adhw4ur7p
+How to download [https://oregonstate.box.com/s/dzdijzw7glxo63niarajqg0adhw4ur7p](https://oregonstate.box.com/s/ggbgtrhw9fdijxzob8n4p8kcfwvg0pu9)
 
 ## Contributors
 - Selena Wallace - primary development and maintenance
