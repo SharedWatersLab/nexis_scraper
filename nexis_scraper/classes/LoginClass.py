@@ -68,10 +68,12 @@ class WebDriverManager:
         self.options = webdriver.ChromeOptions()
         self.options.page_load_strategy = 'normal'
         self.options.add_argument("--start-maximized")
-        self.options.add_argument("user-data-dir=/tmp/storedLoginInformation")  
-        
+        #self.options.add_argument("user-data-dir=/tmp/storedLoginInformation")  
+            
+        temp_dir = tempfile.mkdtemp(prefix=f"chrome_profile_{uuid.uuid4().hex[:8]}_")
+        self.options.add_argument(f"user-data-dir={temp_dir}")
 
-        # Add these lines to disable GCM/push notifications
+        # disable GCM/push notifications
         self.options.add_argument("--disable-background-networking")
         self.options.add_argument("--disable-background-timer-throttling")
         self.options.add_argument("--disable-backgrounding-occluded-windows")
@@ -81,7 +83,7 @@ class WebDriverManager:
         self.options.add_argument("--disable-logging")
         self.options.add_argument("--log-level=3")  # Only fatal errors
 
-        # NEW: Disable bounce tracking protection
+        # disable bounce tracking protection
         self.options.add_argument('--disable-blink-features=AutomationControlled')
         self.options.add_argument('--disable-features=BounceTrackingMitigations')
         self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -128,30 +130,18 @@ class Login:
         except NoSuchElementException:
             return False
     
-    def reset(self):
-        self.number += 1 # self.number = self.number + 1
-        self.temp_foldername = "storedLoginInformation" + str(self.number)
+    # def reset(self):
+    #     self.number += 1 # self.number = self.number + 1
+    #     self.temp_foldername = "storedLoginInformation" + str(self.number)
 
     def login_page(self):
         
-        #TuftsLogin_selector = ".btn-shib > .login"
-        #OpenAthens_selector = '#lachooser-container > div:nth-child(2) > div > div:nth-child(1) > div:nth-child(1) > div'
-        
         try:
             # First check which elements are present
-            # openathens_elements = self.driver.find_elements(By.CSS_SELECTOR, OpenAthens_selector)
-            # tufts_elements = self.driver.find_elements(By.CSS_SELECTOR, TuftsLogin_selector)
-            
+
             bama_element = 'body > div.content > div > div.col1 > div.mybama-login > a'
             self._click_from_css(bama_element)
             print("logging in with myBama credentials")
-
-            # if openathens_elements:
-            #     time.sleep(3)
-            #     self._click_from_css(OpenAthens_selector)
-            #     print("clicking through new OpenAthens page to get to login home")
-            # elif tufts_elements:
-            #     print("On Tufts login page")
             
             time.sleep(3)
             print("entering login information")
@@ -171,10 +161,7 @@ class Login:
 
     def _init_login(self):
         
-        #loggedin_home = "https://login.ezproxy.library.tufts.edu/login?auth=tufts&url=http://www.nexisuni.com"
         loggedin_home = 'https://login.libdata.lib.ua.edu/login?qurl=http%3a%2f%2fwww.nexisuni.com'
-        #loggedin_home = 'https://advance.lexis.com/bisnexishome?crid=d3501b72-d1a7-4238-a3de-5734b95dd81b&pdmfid=1519360&pdisurlapi=true'
-        #loggedin_home = 'https://advance-lexis-com.libdata.lib.ua.edu/bisnexishome/'
         self.driver.get(self.url or loggedin_home)
         time.sleep(5)
         
@@ -223,11 +210,9 @@ class Login:
                 time.sleep(5)
 
             except TimeoutException:
-                #print("logged in automatically for some reason")
                 pass
 
     def handle_duo_2fa(self):
-        #duo_page_substring = "https://api-58712eef.duosecurity.com/frame/v4/auth/prompt?sid=frameless-"
         max_attempts = 2
         attempt = 0
 
@@ -300,28 +285,3 @@ class Login:
         except TimeoutException:
             print("login successful")
             return False
-
-# plop into main
-
-# from classes.LoginClass import WebDriverManager, Login, PasswordManager
-
-# if __name__ == "__main__":  
-    
-#     # will ask for and set password
-#     pm = PasswordManager()
-#     if pm.password is None:
-#         password = pm.get_password()
-#         print("Password set!")
-#     else: pass
-    
-#     # will open chrome
-#     manager = WebDriverManager()
-#     driver = manager.start_driver()
-#     options = manager.setup_options()
-
-#     # will log in (tufts)
-#     login = Login(user_name=user_name, password=password, driver_manager=manager, url=None)
-#     login._init_login()
-
-# '''
-

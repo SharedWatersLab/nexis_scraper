@@ -455,8 +455,6 @@ class Download:
         """Get ranges based on result count and download limit"""
         # get full count from site
         full_count = self.get_result_count() 
-        #print(f"DEBUG: get_result_count() returned: {full_count}")
-        
         # hard-coding limit of 500 to it because that's the nexis uni limit for word full text
         download_limit = 500 
 
@@ -478,11 +476,9 @@ class Download:
             if r == ranges[-1]:
                 start_num = r.split('-')[0]
                 if any(dr.split('-')[0] == start_num for dr in downloaded_ranges):
-                    #print(f"DEBUG: final range start number found, skipped")
                     continue
             not_downloaded_ranges.append(r)
         not_downloaded_ranges = sorted(not_downloaded_ranges, key=lambda x: int(x.split('-')[0]))
-        #print(f"DEBUG: Final not_downloaded_ranges: {not_downloaded_ranges}")
         return not_downloaded_ranges
     
     def check_for_download_restriction(self):
@@ -562,7 +558,6 @@ class Download:
                 download_btn = WebDriverWait(self.driver, 10).until(
                     EC.element_to_be_clickable((by_type, selector["value"]))
                 )
-                print(f"[DEBUG] Found download button using {selector['type']}: {selector['value']}")
                 break
             except TimeoutException:
                 continue
@@ -577,7 +572,6 @@ class Download:
         try:
             download_btn.click()
         except (ElementClickInterceptedException, ElementNotInteractableException):
-            print("[DEBUG] Standard click failed, using JS click")
             self.driver.execute_script("arguments[0].click();", download_btn)
         
         # Wait briefly for dialog to appear
@@ -592,17 +586,11 @@ class Download:
                 range_element = WebDriverWait(self.driver, 10).until(
                     EC.element_to_be_clickable((by_type, selector["value"]))
                 )
-                print(f"[DEBUG] Found range field using {selector['type']}: {selector['value']}")
                 break
             except TimeoutException:
-                print(f"[DEBUG] Selector failed: {selector['value']}")
                 continue
         
         if not range_element:
-            # Debug info before failing
-            print(f"[ERROR] Could not find range input field for range {r}")
-            print(f"[DEBUG] Current URL: {self.driver.current_url}")
-            print(f"[DEBUG] Page title: {self.driver.title}")
             try:
                 self.driver.save_screenshot(f"error_range_field_{r}.png")
             except:
@@ -624,7 +612,6 @@ class Download:
         
         # Step 4: Enter the range
         range_element.send_keys(str(r))
-        print(f"[DEBUG] Entered range {r}")
         time.sleep(1)
 
 

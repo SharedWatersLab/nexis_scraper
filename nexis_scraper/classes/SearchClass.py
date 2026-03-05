@@ -11,16 +11,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.keys import Keys 
 
-#from nexis_scraper.classes.DownloadClass import Download
-
 class Search:
+    
+    BOX3_LIMIT = 1500  # Tunable parameter for testing
+
     def __init__(self, driver: webdriver, basin_code, username, nexis_scraper_folder, timeout=20, url=None):
         self.driver = driver
         self.url = url
         self.timeout = timeout
         self.basin_code = basin_code
-        self.username = username  # Consistent naming
-        self.nexis_scraper_folder = nexis_scraper_folder  # Now passed directly from paths
+        self.username = username  
+        self.nexis_scraper_folder = nexis_scraper_folder  
 
         # this can manually be set to True if we want to try with narrower search terms/fewer results
         self.use_riparian = False # range count >500 will "flip this switch" to proceed with riparian country search
@@ -36,6 +37,7 @@ class Search:
         self.box_1_keys = 'water* OR river* OR lake* OR dam* OR stream OR streams OR tributar* OR irrigat* OR flood* OR drought* OR canal* OR hydroelect* OR reservoir* OR groundwater* OR aquifer* OR riparian* OR pond* OR wadi* OR creek* OR oas*s OR spring*'
         self.box_2_keys = 'treaty OR treaties OR agree* OR negotiat* OR mediat* OR resolv* OR facilitat* OR resolution OR commission* OR council* OR dialog* OR meet* OR discuss* OR secretariat* OR manag* OR peace* OR accord OR settle* OR cooperat* OR collaborat* OR diplomacy OR diplomat* OR statement OR "memo" OR "memos" OR memorand* OR convers* OR convene* OR convention* OR declar* OR allocat*OR share*OR sharing OR apportion* OR distribut* OR ration* OR administ* OR trade* OR trading OR communicat* OR notif* OR trust* OR distrust* OR mistrust*OR support* OR relations* OR consult* OR alliance* OR ally OR allies OR compensat* OR disput* OR conflict* OR disagree* OR sanction* OR war* OR troop* OR skirmish OR hostil* OR attack* OR violen* OR boycott* OR protest* OR clash* OR appeal* OR intent* OR reject* OR threat* OR forc* OR coerc* OR assault* OR fight OR demand* OR disapprov*  OR bomb* OR terror* OR assail* OR insurg* OR counterinsurg* OR destr* OR agitat* OR aggrav* OR veto* OR ban* OR exclud* OR prohibit* OR withdraw* OR suspect* OR combat* OR milit* OR refus* OR deteriorat* OR spurn* OR invad* OR invasion* OR blockad* OR debat* OR refugee* OR migrant* OR violat*'
         self.box_3_keys = self.search_term
+        self.box_3_keys = self._truncate_box3() # Apply truncation immediately if needed
         self.box_4_keys = 'ocean* OR "bilge water" OR "flood of refugees" OR waterproof OR “water resistant” OR streaming OR streame*'
 
     def _click_from_css(self, css_selector):
@@ -96,24 +98,65 @@ class Search:
         print("Initializing search for " + self.basin_code)
         #print(f"Initializing search for {row['Basin_Name']})
 
+    def _truncate_box3(self):
+        """Truncate box 3 terms if they exceed BOX3_LIMIT"""
+        # Only apply this for non-riparian searches
+        # Riparian searches will handle their own truncation
+        if self.use_riparian:
+            return self.box_3_keys  # Don't pre-truncate for riparian
+        
+        if len(self.box_3_keys) <= self.BOX3_LIMIT:
+            return self.box_3_keys
+        
+        truncated = self.box_3_keys[:self.BOX3_LIMIT]
+        last_or_pos = truncated.rfind(" OR ")
+        
+        if last_or_pos == -1:
+            return truncated
+        
+        final_truncated = self.box_3_keys[:last_or_pos]
+        
+        if len(self.box_3_keys) > self.BOX3_LIMIT:
+            chars_removed = len(self.box_3_keys) - len(final_truncated)
+            print(f"Box 3 truncated for default search: removed {chars_removed} chars")
+        
+        return final_truncated
+    
     def riparian_search(self):
         riparian_country_terms = self.row['Riparian_country_term'].values[0]
         box_5_keys = riparian_country_terms
-        string_with_country_names = 'hlead(' + self.box_1_keys + ') and hlead(' + self.box_2_keys + ') and hlead(' + self.box_3_keys + ') and hlead(' + box_5_keys + ') and not hlead(' + self.box_4_keys + ')'
-
-        if len(string_with_country_names) < 5000: # to see if it fits our search limit
-            print("search string is within limit")
+        
+        # Check if box_3 + box_5 fit within our flexible space limit
+        flexible_space_used = len(self.box_3_keys) + len(box_5_keys)
+        
+        if flexible_space_used <= self.BOX3_LIMIT:
+            # Both fit, use them as-is
+            print("box 3 and riparian terms fit within limit")
+            string_with_country_names = 'hlead(' + self.box_1_keys + ') and hlead(' + self.box_2_keys + ') and hlead(' + self.box_3_keys + ') and hlead(' + box_5_keys + ') and not hlead(' + self.box_4_keys + ')'
             return string_with_country_names
         else:
-            excess_chars = len(string_with_country_names) - 5000 # how much longer is the string than the Nexis Uni limit?
-            remove_from_box3 = len(self.box_3_keys) - excess_chars # how long does this make basin-specific limit?
-            #print(f"string is {len(string_with_country_names)} characters, need to create a shorter string")
-            box3_truncated = self.box_3_keys[:remove_from_box3] # trims basin-specific terms to exactly the limit
-            last_or_pos = box3_truncated.rfind(" OR ") # finds the nearest 'or'
-            # update the variable
-            new_box_3_keys = self.box_3_keys[:last_or_pos] # truncates from there so the final term is a complete one
+            # Need to truncate box_3 to make room for box_5
+            print("box 3 + riparian terms exceed limit, truncating box 3")
+            
+            # Calculate new limit for box_3: total flexible space minus what box_5 needs
+            new_box3_limit = self.BOX3_LIMIT - len(box_5_keys)
+            
+            if new_box3_limit < 0:
+                print("WARNING: riparian terms alone exceed BOX3_LIMIT!")
+                new_box3_limit = 0
+            
+            # Truncate box_3 to the new limit
+            box3_truncated = self.box_3_keys[:new_box3_limit]
+            last_or_pos = box3_truncated.rfind(" OR ")
+            
+            if last_or_pos == -1:
+                new_box_3_keys = box3_truncated
+            else:
+                new_box_3_keys = self.box_3_keys[:last_or_pos]
+            
             truncated_riparian_string = 'hlead(' + self.box_1_keys + ') and hlead(' + self.box_2_keys + ') and hlead(' + new_box_3_keys + ') and hlead(' + box_5_keys + ') and not hlead(' + self.box_4_keys + ')'
-            #print(f"new search string is {len(truncated_riparian_string)} characters")
+            
+            print(f"box 3 truncated for riparian: {len(self.box_3_keys)} → {len(new_box_3_keys)} chars to make room for {len(box_5_keys)} char riparian terms")
             return truncated_riparian_string
 
     def default_search(self):
@@ -312,16 +355,46 @@ class Search:
             """Flips the switch permanently"""
             print("Switching to riparian search mode...")
             self.use_riparian = True
-            # and then create a .txt file that's called 'riparian' and add it to the downloads/bcode folder, which we'll track in main sheet at completion
-            #riparian_txt = os.path.join(self.nexis_scraper_folder, "data", "downloads", self.basin_code, "riparian_names_used.txt")
+            # Create a .txt file marker in the downloads/bcode folder
             if not os.path.exists(self.riparian_txt):
-                os.makedirs(self.riparian_txt)
+                # First ensure parent directory exists
+                os.makedirs(os.path.dirname(self.riparian_txt), exist_ok=True)
+                # Then create the file
+                with open(self.riparian_txt, 'w') as f:
+                    f.write("Riparian search terms used\n")
         
         else:
             pass
+
+    def check_riparian_already_used(self):
+        """Check if riparian search was already used for this basin.
+        
+        Checks for either:
+        - The file riparian_names_used.txt (correct format)
+        - A folder named riparian_names_used.txt (Windows bug from old code)
+        
+        Returns True if found, automatically switches to riparian mode.
+        """
+        # Check if it exists as either file or folder
+        if os.path.exists(self.riparian_txt):
+            if os.path.isfile(self.riparian_txt):
+                print(f"Found existing riparian marker file for {self.basin_code}")
+                self.use_riparian = True
+                return True
+            elif os.path.isdir(self.riparian_txt):
+                print(f"Found existing riparian marker folder for {self.basin_code} (old Windows bug)")
+                print("Converting folder to file...")
+                # Remove the folder, create the file
+                import shutil
+                shutil.rmtree(self.riparian_txt)
+                with open(self.riparian_txt, 'w') as f:
+                    f.write("Riparian search terms used\n")
+                self.use_riparian = True
+                return True
+        return False
     
     def search_process(self, start_date, end_date):
-
+        self.check_riparian_already_used()
         self.NexisHome()
         self._init_search()
         self._search_box()
@@ -344,5 +417,3 @@ class Search:
         #continue
         self.complete_search()
         time.sleep(5)
-
-#search = newsearch(nlc, download)
