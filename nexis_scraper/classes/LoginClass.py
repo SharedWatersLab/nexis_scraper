@@ -8,20 +8,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.common.exceptions import ElementNotInteractableException
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service as ChromeService
-
-from chromedriver_py import binary_path  
 
 import os
 import sys
 import pandas as pd
 import time
 import getpass
-from pathlib import Path
 
 import tempfile
 import uuid
@@ -53,16 +47,9 @@ class WebDriverManager:
         self.options = ChromeOptions()
         self.setup_options()
         
-        # Use consistent path handling
-        self.driver_dir = Path("./chromedriver")
-        chromedriver_name = "chromedriver.exe" if sys.platform.startswith("win") else "chromedriver"
-        self.driver_path = self.driver_dir / chromedriver_name
-        
-        # Ensure the driver exists before creating service
-        if not self.driver_path.exists():
-            raise FileNotFoundError(f"ChromeDriver not found at {self.driver_path}. Run download_driver.py first.")
-        
-        self.service = Service(str(self.driver_path))
+        # Use webdriver_manager for automatic driver version management
+        driver_path = ChromeDriverManager().install()
+        self.service = Service(driver_path)
     
     def setup_options(self):
         self.options = webdriver.ChromeOptions()

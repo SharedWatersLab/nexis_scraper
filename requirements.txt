@@ -1,7 +1,8 @@
+requests
 selenium
 webdriver-manager
 pandas
-geopandas
+#geopandas
 python-dotenv
 chromedriver_py
 openpyxl
