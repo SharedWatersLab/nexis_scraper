@@ -9,11 +9,14 @@ from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException
-from selenium.webdriver.common.keys import Keys 
+from selenium.webdriver.common.keys import Keys
 
-class Search:
-    
-    BOX3_LIMIT = 1500  # Tunable parameter for testing
+from classes.BaseClass import SeleniumBase
+
+
+class Search(SeleniumBase):
+
+    BOX3_LIMIT = 1500  # Max characters for search box 3 (Nexis Uni search field limit)
 
     def __init__(self, driver: webdriver, basin_code, username, nexis_scraper_folder, timeout=20, url=None):
         self.driver = driver
@@ -33,39 +36,17 @@ class Search:
         self.row = tracking_sheet[tracking_sheet['BCODE'] == basin_code.upper()]
         self.search_term = self.row['Basin_Specific_Terms'].values[0]
 
-        # search keys
+        # The Nexis Uni advanced search uses four boolean “boxes” combined with AND/NOT:
+        #   box_1: water-related geography terms (river, lake, dam, aquifer…)
+        #   box_2: cooperation/conflict action terms (treaty, negotiate, war, sanction…)
+        #   box_3: basin-specific terms from the tracking spreadsheet (e.g. country/river names)
+        #   box_4: exclusion terms — false-positive water references to filter out
         self.box_1_keys = 'water* OR river* OR lake* OR dam* OR stream OR streams OR tributar* OR irrigat* OR flood* OR drought* OR canal* OR hydroelect* OR reservoir* OR groundwater* OR aquifer* OR riparian* OR pond* OR wadi* OR creek* OR oas*s OR spring*'
-        self.box_2_keys = 'treaty OR treaties OR agree* OR negotiat* OR mediat* OR resolv* OR facilitat* OR resolution OR commission* OR council* OR dialog* OR meet* OR discuss* OR secretariat* OR manag* OR peace* OR accord OR settle* OR cooperat* OR collaborat* OR diplomacy OR diplomat* OR statement OR "memo" OR "memos" OR memorand* OR convers* OR convene* OR convention* OR declar* OR allocat*OR share*OR sharing OR apportion* OR distribut* OR ration* OR administ* OR trade* OR trading OR communicat* OR notif* OR trust* OR distrust* OR mistrust*OR support* OR relations* OR consult* OR alliance* OR ally OR allies OR compensat* OR disput* OR conflict* OR disagree* OR sanction* OR war* OR troop* OR skirmish OR hostil* OR attack* OR violen* OR boycott* OR protest* OR clash* OR appeal* OR intent* OR reject* OR threat* OR forc* OR coerc* OR assault* OR fight OR demand* OR disapprov*  OR bomb* OR terror* OR assail* OR insurg* OR counterinsurg* OR destr* OR agitat* OR aggrav* OR veto* OR ban* OR exclud* OR prohibit* OR withdraw* OR suspect* OR combat* OR milit* OR refus* OR deteriorat* OR spurn* OR invad* OR invasion* OR blockad* OR debat* OR refugee* OR migrant* OR violat*'
+        self.box_2_keys = 'treaty OR treaties OR agree* OR negotiat* OR mediat* OR resolv* OR facilitat* OR resolution OR commission* OR council* OR dialog* OR meet* OR discuss* OR secretariat* OR manag* OR peace* OR accord OR settle* OR cooperat* OR collaborat* OR diplomacy OR diplomat* OR statement OR “memo” OR “memos” OR memorand* OR convers* OR convene* OR convention* OR declar* OR allocat*OR share*OR sharing OR apportion* OR distribut* OR ration* OR administ* OR trade* OR trading OR communicat* OR notif* OR trust* OR distrust* OR mistrust*OR support* OR relations* OR consult* OR alliance* OR ally OR allies OR compensat* OR disput* OR conflict* OR disagree* OR sanction* OR war* OR troop* OR skirmish OR hostil* OR attack* OR violen* OR boycott* OR protest* OR clash* OR appeal* OR intent* OR reject* OR threat* OR forc* OR coerc* OR assault* OR fight OR demand* OR disapprov*  OR bomb* OR terror* OR assail* OR insurg* OR counterinsurg* OR destr* OR agitat* OR aggrav* OR veto* OR ban* OR exclud* OR prohibit* OR withdraw* OR suspect* OR combat* OR milit* OR refus* OR deteriorat* OR spurn* OR invad* OR invasion* OR blockad* OR debat* OR refugee* OR migrant* OR violat*'
         self.box_3_keys = self.search_term
-        self.box_3_keys = self._truncate_box3() # Apply truncation immediately if needed
-        self.box_4_keys = 'ocean* OR "bilge water" OR "flood of refugees" OR waterproof OR “water resistant” OR streaming OR streame*'
+        self.box_3_keys = self._truncate_box3()  # Truncate to BOX3_LIMIT if needed
+        self.box_4_keys = 'ocean* OR “bilge water” OR “flood of refugees” OR waterproof OR “water resistant” OR streaming OR streame*'
 
-    def _click_from_css(self, css_selector):
-        element = WebDriverWait(self.driver, self.timeout).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector))
-        )
-        element.click()
-    
-    def _send_keys_from_css(self, css_selector, keys):
-        element = WebDriverWait(self.driver, self.timeout).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector))
-        )
-        element.send_keys(keys)
-
-    def _click_from_xpath(self, xpath):
-        try:
-            element = WebDriverWait(self.driver, self.timeout).until(
-                EC.element_to_be_clickable((By.XPATH, xpath)))
-            element.click()
-        except TimeoutException:
-            raise NoSuchElementException(f"Element with xpath '{xpath}' not found")
-        
-    def _send_keys_from_xpath(self, xpath, keys):
-        wait = WebDriverWait(self.driver, self.timeout)
-        element = wait.until(EC.element_to_be_clickable((By.XPATH, xpath))) 
-        self.driver.execute_script("arguments[0].scrollIntoView();", element)
-        element.send_keys(keys)
-    
     def NexisHome(self):
         try:
             ignore_button = WebDriverWait(self.driver, 5).until(
@@ -123,6 +104,15 @@ class Search:
         return final_truncated
     
     def riparian_search(self):
+        """Build a narrower search string that includes riparian country names.
+
+        Used when the default search returns too many results (> 150k) to download
+        efficiently. By adding country names (e.g. 'Egypt OR Sudan OR Ethiopia') the
+        result set is narrowed to articles that explicitly mention the relevant nations.
+
+        BOX3_LIMIT governs the total character budget shared between the basin-specific
+        terms (box 3) and the country names — box 3 is truncated if needed to make room.
+        """
         riparian_country_terms = self.row['Riparian_country_term'].values[0]
         box_5_keys = riparian_country_terms
         
@@ -172,11 +162,13 @@ class Search:
         self.search_box = '#searchTerms' # css
         #self.search_box = "//input[@type='text' and @id='searchTerms']"
         
+        # GRND basin uses a special groundwater query instead of the standard box structure
         if self.basin_code == 'GRND':
             search_string = self.groundwater_search()
             print("performing groundwater search")
-
-        if self.use_riparian: # if that "switch" in init has been flipped due to persistent download failure exception
+        elif self.use_riparian:
+            # use_riparian is set when result count exceeds 150k (see utils.py)
+            # riparian adds country names to narrow results
             search_string = self.riparian_search()
             print("adding riparian country terms to search terms")
         else:
@@ -188,155 +180,121 @@ class Search:
         
         time.sleep(5)
 
-    #click search
+    # XPath and CSS selectors for the search button (Nexis Uni has two variants)
+    _SEARCH_BUTTON_XPATHS = [
+        "//button[@class='btn search' and @data-action='search']",
+        "//button[@data-action='search' and @id='mainSearch' and @aria-label='Search']",
+    ]
+    _SEARCH_BUTTON_CSS = ["button.btn.search[data-action='search']", "#mainSearch"]
+
+    # Elements that only appear on the results page — used to verify search succeeded
+    _RESULT_INDICATORS = [
+        "//li[contains(@class, 'active') and @data-actualresultscount]",
+        "//button[@data-id='urb:hlct:16']",
+        "//div[contains(@class, 'results-list')]",
+    ]
+
+    def _is_on_results_page(self):
+        """Return True if any results-page indicator element is visible."""
+        for indicator in self._RESULT_INDICATORS:
+            try:
+                if self.driver.find_element(By.XPATH, indicator).is_displayed():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _wait_for_results_page(self, timeout=10):
+        """Wait up to `timeout` seconds for the results page to appear."""
+        for indicator in self._RESULT_INDICATORS:
+            try:
+                WebDriverWait(self.driver, timeout).until(
+                    EC.presence_of_element_located((By.XPATH, indicator))
+                )
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _find_and_click_search_button(self):
+        """Try all known search button selectors and click the first one found.
+
+        Uses _try_click() (from SeleniumBase) which attempts standard click,
+        JS click, and ActionChains in sequence.
+        Returns True if a button was successfully clicked.
+        """
+        # Try XPath selectors
+        for xpath in self._SEARCH_BUTTON_XPATHS:
+            try:
+                button = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))
+                )
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                time.sleep(1)
+                if self._try_click(button):
+                    print(f"Clicked search button (xpath: {xpath})")
+                    return True
+            except Exception:
+                continue
+
+        # Try CSS selectors
+        for css in self._SEARCH_BUTTON_CSS:
+            try:
+                button = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, css))
+                )
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                time.sleep(1)
+                if self._try_click(button):
+                    print(f"Clicked search button (css: {css})")
+                    return True
+            except Exception:
+                continue
+
+        # Last resort: find any visible button with "Search" text
+        try:
+            buttons = self.driver.find_elements(
+                By.XPATH, "//button[contains(text(), 'Search') or contains(@aria-label, 'Search')]"
+            )
+            for button in buttons:
+                if button.is_displayed():
+                    self.driver.execute_script("arguments[0].click();", button)
+                    print("Clicked search button (text fallback)")
+                    return True
+        except Exception:
+            pass
+
+        return False
+
     def complete_search(self, max_attempts=3):
-        self.search_button_lower = "//button[@class='btn search' and @data-action='search']"
-        self.search_button_upper = "//button[@data-action='search' and @id='mainSearch' and @aria-label='Search']"
-        search_buttons_css = ["button.btn.search[data-action='search']", "#mainSearch"]
-        
+        """Click the search button and verify we land on the results page.
+
+        Retries up to max_attempts times. Returns True on success, False if
+        the results page never loads after all attempts.
+        """
         for attempt in range(max_attempts):
             try:
-                # First check if we're already on the results page (if a previous click worked but didn't register in code)
-                try:
-                    # Check for elements that only appear on results page
-                    result_indicators = [
-                        "//li[contains(@class, 'active') and @data-actualresultscount]",
-                        "//button[@data-id='urb:hlct:16']",
-                        "//div[contains(@class, 'results-list')]"
-                    ]
-                    
-                    for indicator in result_indicators:
-                        try:
-                            if self.driver.find_element(By.XPATH, indicator).is_displayed():
-                                print("Already on results page, search was successful")
-                                return True
-                        except:
-                            continue
-                except:
-                    pass
-                
-                # Try clicking with different methods
-                clicked = False
-                
-                # Try XPath methods first
-                try:
-                    # Try to make sure the button is in view
-                    for xpath in [self.search_button_lower, self.search_button_upper]:
-                        try:
-                            button = WebDriverWait(self.driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, xpath))
-                            )
-                            # Scroll to the button
-                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                            time.sleep(1)  # Give a moment for the page to settle
-                            
-                            # Try multiple click methods
-                            try:
-                                button.click()
-                                clicked = True
-                                print(f"Clicked search button using standard click with xpath: {xpath}")
-                                break
-                            except:
-                                try:
-                                    self.driver.execute_script("arguments[0].click();", button)
-                                    clicked = True
-                                    print(f"Clicked search button using JS click with xpath: {xpath}")
-                                    break
-                                except:
-                                    try:
-                                        ActionChains(self.driver).move_to_element(button).click().perform()
-                                        clicked = True
-                                        print(f"Clicked search button using ActionChains with xpath: {xpath}")
-                                        break
-                                    except:
-                                        continue
-                        except:
-                            continue
-                except:
-                    pass
-                    
-                # If XPath methods failed, try CSS methods
-                if not clicked:
-                    for css in search_buttons_css:
-                        try:
-                            button = WebDriverWait(self.driver, 5).until(
-                                EC.element_to_be_clickable((By.CSS_SELECTOR, css))
-                            )
-                            # Scroll to the button
-                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                            time.sleep(1)
-                            
-                            try:
-                                button.click()
-                                clicked = True
-                                print(f"Clicked search button using standard click with CSS: {css}")
-                                break
-                            except:
-                                try:
-                                    self.driver.execute_script("arguments[0].click();", button)
-                                    clicked = True
-                                    print(f"Clicked search button using JS click with CSS: {css}")
-                                    break
-                                except:
-                                    try:
-                                        ActionChains(self.driver).move_to_element(button).click().perform()
-                                        clicked = True
-                                        print(f"Clicked search button using ActionChains with CSS: {css}")
-                                        break
-                                    except:
-                                        continue
-                        except:
-                            continue
-                
-                # If no click worked, try a last resort
-                if not clicked:
-                    try:
-                        # Try to find any search button by text content
-                        search_buttons = self.driver.find_elements(By.XPATH, "//button[contains(text(), 'Search') or contains(@aria-label, 'Search')]")
-                        for button in search_buttons:
-                            if button.is_displayed():
-                                self.driver.execute_script("arguments[0].click();", button)
-                                clicked = True
-                                print("Clicked search button using text content search")
-                                break
-                    except:
-                        pass
-                
-                # Wait for results page to load
+                if self._is_on_results_page():
+                    print("Already on results page, search was successful")
+                    return True
+
+                self._find_and_click_search_button()
+
                 time.sleep(5)
-                
-                # Verify we're on the results page
-                try:
-                    # Try to find an element that should be on the results page
-                    for indicator in result_indicators:
-                        try:
-                            WebDriverWait(self.driver, 10).until(
-                                EC.presence_of_element_located((By.XPATH, indicator))
-                            )
-                            print("Successfully verified we're on results page")
-                            return True
-                        except:
-                            continue
-                    
-                    # If we got here, we likely didn't reach the results page
-                    if attempt < max_attempts - 1:
-                        print(f"Search attempt {attempt+1} failed. Search button may have been clicked but results page not loaded. Retrying...")
-                        # Try refreshing if on an error page
-                        if "error" in self.driver.title.lower() or "problem" in self.driver.title.lower():
-                            self.driver.refresh()
-                            time.sleep(5)
-                    else:
-                        print("All search attempts failed. Could not reach results page.")
-                        return False
-                        
-                except Exception as e:
-                    print(f"Error verifying results page: {str(e)}")
-                    if attempt < max_attempts - 1:
-                        print(f"Retrying search (attempt {attempt+2}/{max_attempts})...")
-                    else:
-                        print("All search attempts failed.")
-                        return False
-                        
+
+                if self._wait_for_results_page():
+                    print("Successfully verified we're on results page")
+                    return True
+
+                if attempt < max_attempts - 1:
+                    print(f"Search attempt {attempt+1} failed — results page not loaded. Retrying...")
+                    if "error" in self.driver.title.lower() or "problem" in self.driver.title.lower():
+                        self.driver.refresh()
+                        time.sleep(5)
+                else:
+                    print("All search attempts failed. Could not reach results page.")
+                    return False
+
             except Exception as e:
                 print(f"Search attempt {attempt+1} failed with error: {str(e)}")
                 if attempt < max_attempts - 1:
@@ -345,14 +303,17 @@ class Search:
                 else:
                     print("All search attempts failed.")
                     return False
-        
+
         return False
 
     def switch_to_riparian(self):
-        
+        """Switch this basin permanently to riparian search mode.
+
+        Sets use_riparian=True and writes a marker file so future runs
+        (after a restart) automatically pick up the riparian mode without
+        having to re-detect the high result count.
+        """
         if self.basin_code != 'GRND':
-            
-            """Flips the switch permanently"""
             print("Switching to riparian search mode...")
             self.use_riparian = True
             # Create a .txt file marker in the downloads/bcode folder

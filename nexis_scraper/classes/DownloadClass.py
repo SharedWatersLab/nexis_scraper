@@ -26,6 +26,7 @@ import re
 
 from classes.LoginClass import Login
 from classes.SearchClass import Search
+from classes.BaseClass import SeleniumBase
 
 
 class DownloadFailedException(Exception):
@@ -33,7 +34,7 @@ class DownloadFailedException(Exception):
         self.message = message
         super().__init__(self.message)
 
-class Download:
+class Download(SeleniumBase):
 
     def __init__(self, driver, basin_code, username, login, search, download_folder: str, download_folder_temp, finished, url=None, timeout=20):
 
@@ -49,36 +50,6 @@ class Download:
         self.download_folder_temp = download_folder_temp
 
     
-    def _click_from_xpath(self, xpath):
-        try:
-            element = WebDriverWait(self.driver, self.timeout).until(
-                EC.element_to_be_clickable((By.XPATH, xpath)))
-            element.click()
-        except TimeoutException:
-            raise NoSuchElementException(f"Element with xpath '{xpath}' not found")
-
-    def _send_keys_from_xpath(self, xpath, keys):
-        wait = WebDriverWait(self.driver, self.timeout)
-        element = wait.until(EC.element_to_be_clickable((By.XPATH, xpath))) 
-        self.driver.execute_script("arguments[0].scrollIntoView();", element)
-        element.send_keys(keys)
-
-    def _click_from_css(self, css_selector):
-        try:
-            element = WebDriverWait(self.driver, self.timeout).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector))
-            )
-            element.click()
-        except TimeoutException:
-            raise NoSuchElementException(f"Element with selector '{css_selector}' not found")
-
-       
-    def _send_keys_from_css(self, css_selector, keys):
-        element = WebDriverWait(self.driver, self.timeout).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
-        )
-        element.send_keys(keys)
-
     def open_timeline(self):
         timeline_button = '#podfiltersbuttondatestr-news' # this is CSS selector
         self._click_from_css(timeline_button)
@@ -247,239 +218,199 @@ class Download:
         self.group_duplicates()
         self.sort_by_date()
 
-    def get_result_count(self, max_attempts=4):
-        """
-        Resilient function to get result count that handles:
-        - Attribute name variations (with/without spaces)
-        - Multiple possible element structures  
-        - Timing issues with large result sets
-        - Future website changes
-        """
-        # doubled all timeouts in this method
+    # Nexis Uni stores result count in data-actualresultscount on the active content-type tab.
+    # The attribute name sometimes has leading/trailing spaces (website inconsistency).
+    _RESULT_COUNT_ATTRIBUTES = [
+        "data-actualresultscount",
+        " data-actualresultscount",
+        "data-actualresultscount ",
+        " data-actualresultscount ",
+    ]
+    _RESULT_COUNT_CSS_SELECTORS = [
+        # Specific selector for the active tab in the sidebar filter panel
+        "#sidebar > div.search-controls > div.content-type-container.isBisNexisRedesign > ul > li.active",
+        # Broader fallback in case the sidebar structure changes
+        "li.active",
+    ]
 
-        for attempt in range(max_attempts): 
+    # JavaScript that polls the DOM for the result count attribute (handles delayed rendering)
+    _RESULT_COUNT_JS = """
+    function waitForResultCount(maxWait) {
+        maxWait = maxWait || 15000;
+        return new Promise(function(resolve) {
+            var startTime = Date.now();
+            var selectors = [
+                '#sidebar > div.search-controls > div.content-type-container.isBisNexisRedesign > ul > li.active',
+                'li.active',
+                'li[class*="active"]'
+            ];
+            var attrs = ['data-actualresultscount', ' data-actualresultscount', 'data-actualresultscount ', ' data-actualresultscount '];
+
+            function check() {
+                for (var i = 0; i < selectors.length; i++) {
+                    var el = document.querySelector(selectors[i]);
+                    if (el) {
+                        for (var j = 0; j < attrs.length; j++) {
+                            var val = el.getAttribute(attrs[j]);
+                            if (val && val.trim() && !isNaN(parseInt(val.trim()))) {
+                                resolve({ value: parseInt(val.trim()), selector: selectors[i], attribute: attrs[j] });
+                                return;
+                            }
+                        }
+                    }
+                }
+                if (Date.now() - startTime < maxWait) {
+                    setTimeout(check, 500);
+                } else {
+                    resolve(null);
+                }
+            }
+            check();
+        });
+    }
+    return waitForResultCount();
+    """
+
+    def _get_count_via_css(self):
+        """Try reading the result count from known CSS selectors.
+
+        Returns the count as an int, or None if not found.
+        """
+        for selector in self._RESULT_COUNT_CSS_SELECTORS:
+            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+            for element in elements:
+                if not element.is_displayed():
+                    continue
+                for attr in self._RESULT_COUNT_ATTRIBUTES:
+                    try:
+                        value = element.get_attribute(attr)
+                        if value and value.strip().isdigit():
+                            print(f"Result count via CSS ({selector}): {value.strip()}")
+                            return int(value.strip())
+                    except Exception:
+                        continue
+        return None
+
+    def _get_count_via_js(self):
+        """Try reading the result count by running JavaScript that polls the DOM.
+
+        More reliable than CSS when the attribute loads asynchronously.
+        Returns the count as an int, or None if not found.
+        """
+        js_result = self.driver.execute_script(self._RESULT_COUNT_JS)
+        if js_result and js_result.get("value"):
+            count = js_result["value"]
+            print(f"Result count via JS ({js_result.get('selector')}): {count}")
+            return count
+        return None
+
+    def get_result_count(self, max_attempts=4):
+        """Return the total number of results for the current search.
+
+        Tries CSS selectors first, then a JavaScript fallback. Retries up to
+        max_attempts times with increasing waits, refreshing the page on the
+        second retry to handle cases where the count loads slowly on the backend.
+
+        Returns the count as an int, or None if it could not be retrieved.
+        """
+        for attempt in range(max_attempts):
             try:
-                #time.sleep(2)
-                #print(f"Attempt {attempt + 1} to get result count...")
-                
-                # Wait for page to be fully loaded and stable
+                # Wait for the page to finish loading (counts can be slow on large result sets)
                 WebDriverWait(self.driver, 40).until(
                     lambda d: d.execute_script("return document.readyState") == "complete"
                 )
-                
-                # Additional wait for any JavaScript to finish (especially important for large result sets)
                 time.sleep(2)
-                
-                # Try to wait for network activity to settle (helps with large result sets)
+
+                # Let any pending jQuery requests settle (not all pages use jQuery)
                 try:
                     WebDriverWait(self.driver, 20).until(
-                        lambda d: d.execute_script("return jQuery.active == 0") if d.execute_script("return typeof jQuery !== 'undefined'") else True
+                        lambda d: d.execute_script("return jQuery.active == 0")
+                        if d.execute_script("return typeof jQuery !== 'undefined'")
+                        else True
                     )
-                except:
-                    pass  # jQuery might not be available
-                
-                # Focus on the core strategies that matter for the data-actualresultscount attribute
-                strategies = [
-                    # Strategy 1: Original specific selector with attribute variations
-                    {
-                        "name": "Original CSS selector",
-                        "method": "css_with_attributes",
-                        "selector": "#sidebar > div.search-controls > div.content-type-container.isBisNexisRedesign > ul > li.active",
-                        "attributes": ["data-actualresultscount", " data-actualresultscount", "data-actualresultscount ", " data-actualresultscount "]
-                    },
-                    
-                    # Strategy 2: More generic CSS selector
-                    {
-                        "name": "Generic li.active selector",
-                        "method": "css_with_attributes", 
-                        "selector": "li.active",
-                        "attributes": ["data-actualresultscount", " data-actualresultscount", "data-actualresultscount ", " data-actualresultscount "]
-                    },
-                    
-                    # Strategy 3: JavaScript-based extraction (most reliable for dynamic content)
-                    {
-                        "name": "JavaScript extraction",
-                        "method": "javascript"
-                    }
-                ]
-                
-                result_count = None
-                successful_strategy = None
-                
-                for strategy in strategies:
-                    try:
-                        if strategy["method"] == "css_with_attributes":
-                            elements = self.driver.find_elements(By.CSS_SELECTOR, strategy["selector"])
-                            for element in elements:
-                                if element.is_displayed():
-                                    for attr in strategy["attributes"]:
-                                        try:
-                                            value = element.get_attribute(attr)
-                                            if value and value.strip() and value.strip().isdigit():
-                                                result_count = int(value.strip())
-                                                successful_strategy = f"{strategy['name']} - attribute: '{attr}'"
-                                                break
-                                        except:
-                                            continue
-                                    if result_count:
-                                        break
-                        
-                        elif strategy["method"] == "javascript":
-                            # Use JavaScript to search for the element and attribute
-                            js_script = """
-                            // Function to wait for the attribute to be populated
-                            function waitForResultCount(maxWait = 15000) {
-                                return new Promise((resolve) => {
-                                    const startTime = Date.now();
-                                    
-                                    function checkForCount() {
-                                        // Try multiple approaches to find the result count
-                                        var possibleSelectors = [
-                                            '#sidebar > div.search-controls > div.content-type-container.isBisNexisRedesign > ul > li.active',
-                                            'li.active',
-                                            'li[class*="active"]'
-                                        ];
-                                        
-                                        for (var i = 0; i < possibleSelectors.length; i++) {
-                                            var element = document.querySelector(possibleSelectors[i]);
-                                            if (element) {
-                                                var attrs = ['data-actualresultscount', ' data-actualresultscount', 'data-actualresultscount ', ' data-actualresultscount '];
-                                                for (var j = 0; j < attrs.length; j++) {
-                                                    var value = element.getAttribute(attrs[j]);
-                                                    if (value && value.trim() && !isNaN(parseInt(value.trim()))) {
-                                                        resolve({
-                                                            value: parseInt(value.trim()), 
-                                                            selector: possibleSelectors[i], 
-                                                            attribute: attrs[j]
-                                                        });
-                                                        return;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        // If not found and we haven't exceeded max wait time, try again
-                                        if (Date.now() - startTime < maxWait) {
-                                            setTimeout(checkForCount, 500);
-                                        } else {
-                                            resolve(null);
-                                        }
-                                    }
-                                    
-                                    checkForCount();
-                                });
-                            }
-                            
-                            return waitForResultCount();
-                            """
-                            
-                            js_result = self.driver.execute_script(js_script)
-                            if js_result and js_result.get('value'):
-                                result_count = js_result['value']
-                                successful_strategy = f"{strategy['name']} - {js_result.get('selector')} with attribute '{js_result.get('attribute')}'"
-                        
-                        if result_count:
-                            print(f"Successfully found result count: {result_count} using {successful_strategy}")
-                            self.result_count = result_count
-                            return result_count
-                            
-                    except Exception as e:
-                        print(f"Strategy '{strategy['name']}' failed")
-                        continue
-                
-                if result_count:
-                    # Validate the result count makes sense (remove upper bound for large datasets)
-                    if result_count > 0:
-                        self.result_count = result_count
-                        print(f"Final result count: {result_count:,}")  # Format with commas for readability
-                        return self.result_count
-                    else:
-                        print(f"Result count {result_count} is not positive, treating as invalid")
-                        result_count = None
-                
-                if result_count is None:
-                    if attempt < max_attempts - 1:
-                        if attempt == 0:
-                            # First retry: just wait longer (common case)
-                            print(f"No result count found on attempt {attempt + 1}, waiting longer and retrying...")
-                            time.sleep(30)  # Longer wait for large result sets
-                        elif attempt == 1:
-                            # Second retry: refresh the page
-                            print("Refreshing page to reload result count data...")
-                            self.driver.refresh()
-                            time.sleep(30)  # Wait for page to reload
-                        else:
-                            # Final retry: longer wait after refresh
-                            print("Final attempt: waiting for backend processing to complete...")
-                            time.sleep(60)
-                    else:
-                        print("Could not retrieve result count after all attempts.")
-                        print("The element may exist but the data-actualresultscount attribute is not being populated.")
-                        return None
-                        
-            except Exception as e:
-                print(f"Attempt {attempt + 1} to get result count failed")
+                except Exception:
+                    pass
+
+                result_count = self._get_count_via_css() or self._get_count_via_js()
+
+                if result_count and result_count > 0:
+                    self.result_count = result_count
+                    return result_count
+
+                # No count found — decide how long to wait before retrying
                 if attempt < max_attempts - 1:
                     if attempt == 0:
-                        print("First exception, waiting and retrying...")
+                        print(f"No result count on attempt {attempt+1}, waiting and retrying...")
+                        time.sleep(30)
+                    elif attempt == 1:
+                        print("Refreshing page to reload result count...")
+                        self.driver.refresh()
+                        time.sleep(30)
+                    else:
+                        print("Final retry: waiting for backend to finish processing...")
+                        time.sleep(60)
+                else:
+                    print("Could not retrieve result count after all attempts.")
+                    return None
+
+            except Exception:
+                print(f"Attempt {attempt+1} to get result count failed")
+                if attempt < max_attempts - 1:
+                    if attempt == 0:
                         time.sleep(10)
                     else:
-                        print("Exception after previous attempts, refreshing page...")
                         self.driver.refresh()
                         time.sleep(10)
                 else:
-                    print("Max attempts reached due to exceptions.")
-                    print("Could not retrieve result count - the data-actualresultscount attribute may not be populating.")
+                    print("Max attempts reached. data-actualresultscount may not be populating.")
                     return None
-        
+
         return None
 
-    # def reset(self):
-    #     sign_in_button = "//button[@id='SignInRegisterBisNexis']"
-    #     try:
-    #         self._click_from_xpath(sign_in_button)
-    #         print("logging out")
-    #     except ElementClickInterceptedException:
-    #         find_sign_in = self.driver.find_element_by_xpath(sign_in_button)
-    #         self.driver.execute_script("return arguments[0].scrollIntoView(true);", find_sign_in)        
-    #     self.driver.delete_all_cookies()
-    #     print("deleting cookies before logging in again")
-    #     time.sleep(3)
-    #     self.login._init_login()
-    #     self.search.search_process(start_date, end_date)
-    #     time.sleep(5)
-    #     self.DownloadSetup()
-
-    #  get_ranges as an instance method
     def get_ranges(self):
-        """Get ranges based on result count and download limit"""
-        # get full count from site
-        full_count = self.get_result_count() 
-        # hard-coding limit of 500 to it because that's the nexis uni limit for word full text
-        download_limit = 500 
+        """Return the list of result ranges that still need to be downloaded.
 
-        # this generates a list of ranges that will be used in the download dialog box
+        Nexis Uni uses 1-based result indices (results 1–500, 501–1000, etc.).
+        Each range string like "1-500" maps to the download dialog's range field.
+
+        Already-downloaded ranges are identified by scanning the basin's download
+        folder for files named '<BCODE>_results_<start>-<end>.ZIP'. The final range
+        gets special treatment: its start number is compared instead of the full
+        string, because the last range may have fewer than 500 results and the exact
+        end number can shift if the result count updates between runs.
+
+        Returns a sorted list of range strings not yet downloaded.
+        """
+        full_count = self.get_result_count()
+        # Nexis Uni caps downloads at 500 documents per request for Word/full-text format
+        download_limit = 500
+
+        # Generate all expected ranges for the full result set (1-indexed)
         ranges = []
         for i in range(1, full_count, download_limit):
             end = min(i + (download_limit - 1), full_count)
             ranges.append(f"{i}-{end}")
 
-        # this matches downloaded files to the ranges
-        downloaded_ranges = [f.split("_")[-1].replace(".ZIP", "") for f in os.listdir(self.download_folder) if f.endswith(".ZIP")]
+        # Parse already-downloaded range strings from filenames like BCODE_results_1-500.ZIP
+        downloaded_ranges = [
+            f.split("_")[-1].replace(".ZIP", "")
+            for f in os.listdir(self.download_folder)
+            if f.endswith(".ZIP")
+        ]
 
-        # this compares those lists and creates a new list of ranges to be downloaded
+        # Find ranges not yet downloaded
         not_downloaded_ranges = []
-        for r in ranges:
-            if r in downloaded_ranges:
+        for range_str in ranges:
+            if range_str in downloaded_ranges:
                 continue
-            # For final range, check if any downloaded range has same start number
-            if r == ranges[-1]:
-                start_num = r.split('-')[0]
+            # For the final range, match on start number only (end may differ if count changed)
+            if range_str == ranges[-1]:
+                start_num = range_str.split('-')[0]
                 if any(dr.split('-')[0] == start_num for dr in downloaded_ranges):
                     continue
-            not_downloaded_ranges.append(r)
-        not_downloaded_ranges = sorted(not_downloaded_ranges, key=lambda x: int(x.split('-')[0]))
-        return not_downloaded_ranges
+            not_downloaded_ranges.append(range_str)
+
+        return sorted(not_downloaded_ranges, key=lambda x: int(x.split('-')[0]))
     
     def check_for_download_restriction(self):
         """Monitor for the yellow download restriction banner that appears briefly"""
@@ -599,17 +530,8 @@ class Download:
         
         # Step 3: Ensure field is visible and clear it
         self.driver.execute_script("arguments[0].scrollIntoView(true);", range_element)
-        time.sleep(0.5)
-        
-        # Clear field (triple-click + delete to ensure it's cleared)
-        try:
-            range_element.triple_click()
-        except:
-            range_element.send_keys(Keys.CONTROL + "a")
-        
-        range_element.send_keys(Keys.DELETE)
-        time.sleep(0.3)
-        
+        range_element.clear()
+
         # Step 4: Enter the range
         range_element.send_keys(str(r))
         time.sleep(1)
@@ -674,13 +596,12 @@ class Download:
 
     
     def move_file(self, r):
-        # Find matching file
-        default_filename = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
+        # Find files matching Nexis Uni's default download naming pattern "Files (N).ZIP"
+        matching_downloads = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
 
-        if default_filename:  # If we found any matching files
+        if matching_downloads:
             print("Download completed!")
-            # Use the first matching file
-            default_download_path = os.path.join(self.download_folder_temp, default_filename[0])
+            default_download_path = os.path.join(self.download_folder_temp, matching_downloads[0])
             nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
 
             # Check if file exists and move it

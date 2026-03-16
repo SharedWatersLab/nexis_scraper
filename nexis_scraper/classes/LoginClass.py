@@ -26,7 +26,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-#from driverTest import SetupDriver  # noqa: E402
+from classes.BaseClass import SeleniumBase
 
 class PasswordManager:
     def __init__(self):
@@ -89,37 +89,14 @@ class WebDriverManager:
             self.driver.quit()
             self.driver = None
 
-class Login:
+class Login(SeleniumBase):
     def __init__(self, user_name, password, driver_manager= WebDriverManager, timeout=20, url=None):
         self.driver_manager = driver_manager
-        self.driver = driver_manager.start_driver() 
+        self.driver = driver_manager.start_driver()
         self.user_name = user_name
         self.password = password
         self.url = url
         self.timeout = timeout
-
-    def _click_from_css(self, css_selector):
-        element = WebDriverWait(self.driver, self.timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
-        )
-        element.click()
-    
-    def _send_keys_from_css(self, css_selector, keys):
-        element = WebDriverWait(self.driver, self.timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
-        )
-        element.send_keys(keys)
-
-    def _is_element_present_css(self, css_selector):
-        try:
-            self.driver.find_element_by_css_selector(css_selector)
-            return True
-        except NoSuchElementException:
-            return False
-    
-    # def reset(self):
-    #     self.number += 1 # self.number = self.number + 1
-    #     self.temp_foldername = "storedLoginInformation" + str(self.number)
 
     def login_page(self):
         
@@ -200,6 +177,12 @@ class Login:
                 pass
 
     def handle_duo_2fa(self):
+        """Complete Duo two-factor authentication.
+
+        Attempt 1: waits for the user to approve a Duo push notification on their device.
+        Attempt 2 (if push times out): switches to phone call authentication.
+        Returns True if authentication succeeded, False after both attempts fail.
+        """
         max_attempts = 2
         attempt = 0
 
@@ -213,7 +196,8 @@ class Login:
                         self._click_from_css("#trust-browser-button")
                         print("DUO push entered, skipping trust browser page")
                         time.sleep(2)
-                    except: NoSuchElementException
+                    except NoSuchElementException:
+                        pass
                     
                     if self.duo_page_substring not in self.driver.current_url:
                         #print("DUO authentication completed")
@@ -234,7 +218,8 @@ class Login:
                             try:
                                 self._click_from_css("#trust-browser-button")
                                 print("skipping trust browser page")
-                            except: NoSuchElementException
+                            except NoSuchElementException:
+                                pass
                             
                             if self.duo_page_substring not in self.driver.current_url:
                                 print("DUO authentication completed")

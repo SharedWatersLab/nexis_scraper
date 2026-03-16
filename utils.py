@@ -4,19 +4,17 @@ from nexis_scraper.classes.SearchClass import Search
 from selenium.common.exceptions import SessionNotCreatedException, TimeoutException, NoSuchElementException
 
 import os
-import shutil
 import time
-import re
 from tqdm import tqdm
-import datetime
-from pathlib import Path
 
 import download_driver
 
-start_date = '06/30/2008'
-end_date = '04/30/2025'
+# Date range for all Nexis Uni queries — update END_DATE when new data is needed
+START_DATE = '06/30/2008'
+END_DATE = '04/30/2025'
 
 _password_cache = None
+
 
 def get_user(basin_code, uname):
     # Use standard paths that work for any user
@@ -24,7 +22,6 @@ def get_user(basin_code, uname):
     nexis_scraper_folder = "./"
     download_folder_temp = os.path.join(base_path, "Downloads")
     download_folder = os.path.join(nexis_scraper_folder, "data", "downloads", basin_code)
-    #download_folder = os.path.join(base_path, "Box", basin_code) # testing if we can download to Box drive from base path directly
 
     paths = {
         "base_path": base_path,
@@ -33,8 +30,9 @@ def get_user(basin_code, uname):
         "download_folder_temp": download_folder_temp,
         "download_folder": download_folder,
     }
-    
+
     return paths, uname
+
 
 def logout_clearcookies(download):
     sign_in_button = "//button[@id='NexisUniMipNewSignIn']"
@@ -42,46 +40,34 @@ def logout_clearcookies(download):
         download._click_from_xpath(sign_in_button)
         print("logging out")
     except Exception as e:
-        #download.handle_popups() # maybe try this, sometimes the problem is the download dialog
         find_sign_in = download.driver.find_element_by_xpath(sign_in_button)
-        download.driver.execute_script("return arguments[0].scrollIntoView(true);", find_sign_in)        
+        download.driver.execute_script("return arguments[0].scrollIntoView(true);", find_sign_in)
     download.driver.delete_all_cookies()
     print("deleting cookies")
 
+
 def reset(download, login, search):
+    """Re-login and re-run search to refresh the session between download ranges."""
     logout_clearcookies(download)
     time.sleep(3)
     login._init_login()
-    search.search_process(start_date, end_date)
+    search.search_process(START_DATE, END_DATE)
     time.sleep(5)
     download.DownloadSetup()
 
-def full_process(basin_code, username, paths):
-    """
-    Main download process function.
-    
-    Args:
-        basin_code (str): The basin code for the geographic area
-        username (str): Username from streamlit input
-        paths (dict): Dictionary containing file paths
-    """
-    print("~" * 27)
-    print(f"Starting download for {basin_code}!")
-    print("~" * 27)
 
-    download_folder = paths["download_folder"]
-    download_folder_temp = paths["download_folder_temp"]
-    
-    # Create download folder if it doesn't exist
+def _ensure_download_folder(download_folder, basin_code):
+    """Create the basin download folder if it doesn't already exist."""
     if os.path.exists(download_folder):
         print(f"{basin_code} folder already exists")
     else:
-        os.makedirs(download_folder, exist_ok=True) 
+        os.makedirs(download_folder, exist_ok=True)
         print(f"created folder {basin_code}")
-    
-    # Password management
-    global _password_cache
 
+
+def _get_or_cache_password():
+    """Return the user's password, prompting once and caching for the session."""
+    global _password_cache
     if _password_cache is None:
         pm = PasswordManager()
         if not pm.password:
@@ -94,10 +80,12 @@ def full_process(basin_code, username, paths):
     else:
         password = _password_cache
         print("Using cached password")
-    
-    # WebDriver setup
-    manager = WebDriverManager()
+    return password
 
+
+def _start_driver():
+    """Start the Chrome WebDriver, auto-updating ChromeDriver if the version is mismatched."""
+    manager = WebDriverManager()
     try:
         driver = manager.start_driver()
     except SessionNotCreatedException:
@@ -105,17 +93,128 @@ def full_process(basin_code, username, paths):
         download_driver.main()
         time.sleep(2)
         driver = manager.start_driver()
+    return manager, driver
 
-    # Login - using consistent username variable
+
+def _run_download_loop(download, login, search, basin_code, download_folder, pbar):
+    """Execute the main per-range download loop for a single basin.
+
+    For each pending range:
+    - Resets the session (re-login + re-search) between ranges to avoid timeouts
+    - Downloads the range and moves the file to the basin folder
+    - Tracks consecutive failures; aborts the basin after failure_threshold in a row
+
+    Returns when all ranges are downloaded or the failure threshold is reached.
+    """
+    consecutive_failures = 0
+    # How many consecutive failures in a row before giving up on this basin entirely
+    failure_threshold = 3
+    completed_ranges = set()
+    process_start_time = time.time()
+
+    while True:
+        ranges_to_download = download.get_ranges()
+
+        if not ranges_to_download:
+            print(f"All ranges for basin {basin_code} downloaded!")
+            logout_clearcookies(download)
+            download.driver.close()
+            return
+
+        print(f"Attempting to download {len(ranges_to_download)} ranges")
+
+        for i, r in enumerate(ranges_to_download):
+            try:
+                if i > 0:
+                    # Re-login and re-run search between ranges to keep the session fresh
+                    reset(download, login, search)
+
+                download.check_clear_downloads(r)
+                try:
+                    download.download_dialog(r)
+                except TimeoutException as te:
+                    print(f"[ERROR] TimeoutException in download_dialog for range {r}: {te}")
+                    try:
+                        prefix = f"timeout_{basin_code}_{r}"
+                        download.driver.save_screenshot(os.path.join(download_folder, f"{prefix}.png"))
+                        with open(os.path.join(download_folder, f"{prefix}.html"), "w", encoding="utf-8") as f:
+                            f.write(download.driver.page_source)
+                    except Exception:
+                        pass
+                    raise
+                except Exception as e:
+                    print(f"[ERROR] Exception during download_dialog for range {r}: {e}")
+                    try:
+                        download.driver.save_screenshot(os.path.join(download_folder, f"err_{basin_code}_{r}.png"))
+                    except Exception:
+                        pass
+                    raise
+
+                print(f"preparing to download range {r}")
+                download.wait_for_download()
+                download.move_file(r)
+
+                elapsed_minutes = (time.time() - process_start_time) / 60
+                consecutive_failures = 0
+                print(f"Time elapsed since process began (minutes): {elapsed_minutes:.1f}")
+
+                if r not in completed_ranges:
+                    completed_ranges.add(r)
+                    pbar.update(1)
+
+            except DownloadFailedException:
+                consecutive_failures += 1
+                print(f"Download failed for range {r} ({consecutive_failures} consecutive failure(s))")
+                reset(download, login, search)
+
+                if consecutive_failures >= failure_threshold:
+                    print(f"{basin_code} downloads failed {failure_threshold} times in a row, please try another basin")
+                    logout_clearcookies(download)
+                    download.driver.close()
+                    return
+
+                continue
+
+            except Exception:
+                continue  # Skip this range and try the next
+
+
+def full_process(basin_code, username, paths):
+    """Orchestrate the full download pipeline for a single basin.
+
+    Phases:
+      1. Folder setup
+      2. Authentication (password + Chrome driver + Nexis login)
+      3. Search execution
+      4. Download setup (sort/group results; switch to riparian search if count > 150k)
+      5. Range-by-range download loop
+
+    Args:
+        basin_code: The basin code (e.g. 'NILE', 'GRND') used for folder naming and search terms
+        username: UA username from the Streamlit input
+        paths: Dict of folder paths produced by get_user()
+    """
+    print("~" * 27)
+    print(f"Starting download for {basin_code}!")
+    print("~" * 27)
+
+    download_folder = paths["download_folder"]
+    download_folder_temp = paths["download_folder_temp"]
+
+    # Phase 1: Folder setup
+    _ensure_download_folder(download_folder, basin_code)
+
+    # Phase 2: Authentication
+    password = _get_or_cache_password()
+    manager, driver = _start_driver()
     login = Login(user_name=username, password=password, driver_manager=manager, url=None)
     login._init_login()
 
-    # Search process
+    # Phase 3: Search
     search = Search(driver, basin_code, username, paths["nexis_scraper_folder"])
-    search.search_process(start_date, end_date)  # Note: These variables need to be set at the top of utils, passed as parameters
+    search.search_process(START_DATE, END_DATE)
 
-
-    # Download setup - streamlined parameters
+    # Phase 4: Download setup
     download = Download(
         driver=driver,
         basin_code=basin_code,
@@ -126,9 +225,8 @@ def full_process(basin_code, username, paths):
         download_folder_temp=download_folder_temp,
         finished=False,
         url=None,
-        timeout=20
+        timeout=20,
     )
-    
 
     time.sleep(5)
     try:
@@ -141,135 +239,19 @@ def full_process(basin_code, username, paths):
                 os.makedirs(zero_txt)
             print(f"Zero results to download for basin {basin_code}")
 
-    # Main download process
-    before = time.time()
-
     if download.get_result_count is None:
         logout_clearcookies(download)
         driver.close()
         return
 
+    # If result count exceeds 150k, narrow results by adding riparian country names to the search
     if download.get_result_count() > 150000 and not getattr(search, 'already_switched_to_riparian', False):
         search.switch_to_riparian()
-        search.already_switched_to_riparian = True  # Prevent re-switching
-        search.search_process(start_date, end_date)
+        search.already_switched_to_riparian = True
+        search.search_process(START_DATE, END_DATE)
         download.DownloadSetup()
 
-    consecutive_failures = 0
-    failure_threshold = 3 # can raise or lower
-
-    running=True
-    # Get initial ranges for progress bar
+    # Phase 5: Download loop
     initial_ranges = download.get_ranges()
-    total_ranges = len(initial_ranges)
-    completed_ranges = set()
-
-    # creae persisitent progress bar outside while loop
-    with tqdm(total=total_ranges, desc=f"Overall Progress on {basin_code}") as pbar:
-
-        while running:
-
-            ranges_to_download = download.get_ranges()
-        
-            # Check if we're done
-            if not ranges_to_download:
-                print(f"All ranges for basin {basin_code} downloaded!")
-                logout_clearcookies(download)
-                driver.close()
-                running = False
-                break
-            
-            print(f"Attempting to download {len(ranges_to_download)} ranges")
-
-            # if consecutive_failures == failure_threshold: # for now change what happens when it fails. do not switch search method.
-            #     # print(f"Too many consecutive failures ({consecutive_failures}), switching search method...")
-            #     print(f"{basin_code} downloads failed {failure_threshold} times in a row, please try another basin")
-            #     logout_clearcookies(download)
-            #     driver.close() # now it will just stop
-            #     #in_progress_download_folder = f"{download_folder}_failed_in_progress"
-            #     #os.rename(download_folder, in_progress_download_folder) # add a label to indicate downloads are not complete for this basin
-            #     running=False
-
-            for i, r in enumerate(ranges_to_download):
-                try:
-                    if i > 0: # if it's not the first loop
-                        reset(download, login, search) # reset, which includes login, search, and setup
-
-                    # if i == len(ranges_to_download) - 1:  # if it's the last loop
-                    #     print("Re-checking ranges before final download...")
-                    #     updated_ranges = download.get_ranges()
-                    #     if updated_ranges and r != updated_ranges[-1]:
-                    #         print(f"Last range updated from {r} to {updated_ranges[-1]}")
-                    #         r = updated_ranges[-1]  # Use the updated last range
-                    
-                    download.check_clear_downloads(r)
-                    try:
-                        download.download_dialog(r)
-                    except TimeoutException as te:
-                        print(f"[ERROR] TimeoutException in download_dialog for range {r}: {te}")
-                        # Save extra debug artifacts after timeout
-                        try:
-                            post_prefix = f"timeout_{basin_code}_{r}"
-                            download.driver.save_screenshot(os.path.join(download_folder, f"{post_prefix}.png"))
-                            with open(os.path.join(download_folder, f"{post_prefix}.html"), "w", encoding="utf-8") as f:
-                                f.write(download.driver.page_source)
-                        except Exception:
-                            pass
-                        raise  # let outer logic handle failures
-                    except Exception as e:
-                        print(f"[ERROR] Exception during download_dialog for range {r}: {e}")
-                        # optionally save debug snapshot
-                        try:
-                            download.driver.save_screenshot(os.path.join(download_folder, f"err_{basin_code}_{r}.png"))
-                        except Exception:
-                            pass
-                        raise
-                    print(f"preparing to download range {r}")
-
-                    download.wait_for_download()
-                    download.move_file(r)
-
-                    after = time.time()
-                    elapsed = after - before
-
-                    consecutive_failures = 0 # reset on success
-                    print("Time elapsed since process began (minutes): ", elapsed/60)
-
-                    # Update progress bar
-                    if r not in completed_ranges:
-                        completed_ranges.add(r)
-                        if len(completed_ranges) <= total_ranges:
-                            pbar.update(1)
-                            if len(completed_ranges) == total_ranges:
-                                print("All original ranges completed!")
-
-                except DownloadFailedException:
-                    consecutive_failures += 1
-                    print(f"Download failed for range {r} after {consecutive_failures} consecutive failure(s)")
-                    reset(download, login, search)
-                    #logout_clearcookies(download)
-                    
-                    # Check if we've hit the failure threshold
-                    if consecutive_failures >= failure_threshold:
-                        print(f"{basin_code} downloads failed {failure_threshold} times in a row, please try another basin")
-                        logout_clearcookies(download)  # You might already have done this above
-                        driver.close()
-                        running = False
-                        break
-
-                    continue  # Try the next range
-                
-                except Exception as e:
-                    #print(f"Error occurred with range {r}: {e}")
-                    continue  # Try next range
-        
-            
-    # finally:
-    #     ranges_to_download = RangesDownload.get_ranges(download, download_folder) # run this again when loop is complete
-
-    #     # get_ranges() will return not_downloaded_ranges as a list
-    #     if not ranges_to_download:
-    #         print("all ranges for basin downloaded")
-    #     else:
-    #         print("ranges remaining:")
-    #         print(ranges_to_download)
+    with tqdm(total=len(initial_ranges), desc=f"Overall Progress on {basin_code}") as pbar:
+        _run_download_loop(download, login, search, basin_code, download_folder, pbar)
