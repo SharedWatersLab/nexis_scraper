@@ -16,7 +16,7 @@ from classes.BaseClass import SeleniumBase
 
 class Search(SeleniumBase):
 
-    BOX3_LIMIT = 1500  # Max characters for search box 3 (Nexis Uni search field limit)
+    BOX3_LIMIT = 1900  # Max characters for search box 3 (Nexis Uni search field limit)
 
     def __init__(self, driver: webdriver, basin_code, username, nexis_scraper_folder, timeout=20, url=None):
         self.driver = driver
