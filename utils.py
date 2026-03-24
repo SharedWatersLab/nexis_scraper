@@ -84,15 +84,13 @@ def _get_or_cache_password():
 
 
 def _start_driver():
-    """Start the Chrome WebDriver, auto-updating ChromeDriver if the version is mismatched."""
+    """Start the Firefox WebDriver.
+
+    GeckoDriverManager (used by WebDriverManager) auto-downloads and caches the
+    correct geckodriver version, so no manual driver update step is needed.
+    """
     manager = WebDriverManager()
-    try:
-        driver = manager.start_driver()
-    except SessionNotCreatedException:
-        print("Session not created, updating driver...")
-        download_driver.main()
-        time.sleep(2)
-        driver = manager.start_driver()
+    driver = manager.start_driver()
     return manager, driver
 
 

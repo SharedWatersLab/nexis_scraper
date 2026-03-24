@@ -4,8 +4,7 @@ webdriver-manager
 pandas
 #geopandas
 python-dotenv
-chromedriver_py
 openpyxl
 tqdm
-jupyter 
-streamlit 
+jupyter
+streamlit
