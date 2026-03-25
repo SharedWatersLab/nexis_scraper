@@ -79,7 +79,8 @@ class Download(SeleniumBase):
         raise ValueError(f"Unable to parse date string: {date_string}")
 
     def group_duplicates(self):
-        actions_dropdown_xpath = "//button[@id='resultlistactionmenubuttonhc-yk' and text()='Actions']"
+        # Button text changed from "Actions" to "More" in a Nexis Uni UI update — match by ID only
+        actions_dropdown_xpath = "//button[@id='resultlistactionmenubuttonhc-yk']"
         time.sleep(5)
         self._click_from_xpath(actions_dropdown_xpath)
         time.sleep(5)
