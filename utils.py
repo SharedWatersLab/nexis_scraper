@@ -121,11 +121,12 @@ def _run_download_loop(download, login, search, basin_code, download_folder, pba
 
         for i, r in enumerate(ranges_to_download):
             try:
+                prev_r = ranges_to_download[i - 1] if i > 0 else None
                 if i > 0:
                     # Re-login and re-run search between ranges to keep the session fresh
                     reset(download, login, search)
 
-                download.check_clear_downloads(r)
+                download.check_clear_downloads(r, prev_r=prev_r)
                 try:
                     download.download_dialog(r)
                 except TimeoutException as te:

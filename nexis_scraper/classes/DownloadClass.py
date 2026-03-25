@@ -596,27 +596,28 @@ class Download(SeleniumBase):
             raise  # Re-raise the unexpected exception
 
     
-    def move_file(self, r):
-        # Find files matching Nexis Uni's default download naming pattern "Files (N).ZIP"
-        matching_downloads = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
+    def move_file(self, r, poll_timeout=60):
+        # Poll for the file — the download UI disappearing doesn't guarantee the file
+        # is on disk yet, so we check repeatedly rather than giving up immediately.
+        deadline = time.time() + poll_timeout
+        matching_downloads = []
+        while time.time() < deadline:
+            matching_downloads = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
+            if matching_downloads:
+                break
+            time.sleep(2)
 
-        if matching_downloads:
-            print("Download completed!")
-            default_download_path = os.path.join(self.download_folder_temp, matching_downloads[0])
-            nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
-
-            # Check if file exists and move it
-            if os.path.isfile(default_download_path):
-                os.rename(default_download_path, nexis_scraper_download_path)
-                print(f"moving file to {nexis_scraper_download_path}")
-
-                
-            # Wait for Box Drive to sync the file
-            # self.wait_for_box_sync(nexis_scraper_download_path)
-
-        else:
+        if not matching_downloads:
             print(f"file containing range {r} was not downloaded")
             raise DownloadFailedException
+
+        print("Download completed!")
+        default_download_path = os.path.join(self.download_folder_temp, matching_downloads[0])
+        nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
+
+        if os.path.isfile(default_download_path):
+            os.rename(default_download_path, nexis_scraper_download_path)
+            print(f"moving file to {nexis_scraper_download_path}")
 
     def wait_for_box_sync(self, file_path, max_wait=30):
         """Wait for file to be fully synced to Box Drive"""
@@ -635,16 +636,33 @@ class Download(SeleniumBase):
         return False
 
 
-    def check_clear_downloads(self, r):
-        """Check for and handle unsorted downloads"""
-        # Find file matching pattern
+    def check_clear_downloads(self, r, prev_r=None):
+        """Check for and handle unsorted downloads.
+
+        If a stray file is found and the previous range's ZIP is missing from the
+        basin folder, the file is probably that download arriving late — so it gets
+        sorted correctly instead of being discarded to the unsorted folder.
+        """
         default_download_pattern = r"Files \(\d+\)\.ZIP"
         matching_files = [f for f in os.listdir(self.download_folder_temp) if re.match(default_download_pattern, f)]
-        
-        if matching_files:  # If any matching files found
-            print("There's an unsorted file in downloads")
-            self.create_unsorted_folder(r)
-            self.move_unsorted(r, matching_files[0])  # Pass the filename to move_unsorted
+
+        if not matching_files:
+            return
+
+        print("There's an unsorted file in downloads")
+
+        # If the previous range's file is missing, assume this is that late-arriving download
+        if prev_r is not None:
+            prev_dest = os.path.join(self.download_folder, f"{self.basin_code}_results_{prev_r}.ZIP")
+            if not os.path.exists(prev_dest):
+                source = os.path.join(self.download_folder_temp, matching_files[0])
+                os.rename(source, prev_dest)
+                print(f"Late-arriving file attributed to previous range {prev_r}, moved correctly")
+                return
+
+        # Can't attribute it to a known range — move to unsorted
+        self.create_unsorted_folder(r)
+        self.move_unsorted(r, matching_files[0])
 
     def create_unsorted_folder(self, r):
         """Create folder for unsorted downloads"""
