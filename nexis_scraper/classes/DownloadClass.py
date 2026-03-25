@@ -596,22 +596,40 @@ class Download(SeleniumBase):
             raise  # Re-raise the unexpected exception
 
     
-    def move_file(self, r):
-        # Find files matching Nexis Uni's default download naming pattern "Files (N).ZIP"
-        matching_downloads = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
+    def move_file(self, r, poll_timeout=120, stable_wait=4):
+        """Find the completed download and move it to the basin folder.
 
-        if matching_downloads:
-            print("Download completed!")
-            default_download_path = os.path.join(self.download_folder_temp, matching_downloads[0])
-            nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
+        Firefox creates the final ZIP filename at 0 bytes the moment a download
+        starts, so we can't move on filename alone. Instead we wait until the file
+        has a non-zero size that hasn't changed over two consecutive checks
+        (stable_wait seconds apart), confirming Firefox has finished writing.
+        """
+        deadline = time.time() + poll_timeout
+        candidate = None
 
-            if os.path.isfile(default_download_path):
-                os.rename(default_download_path, nexis_scraper_download_path)
-                print(f"moving file to {nexis_scraper_download_path}")
+        while time.time() < deadline:
+            matching_downloads = [f for f in os.listdir(self.download_folder_temp)
+                                  if re.match(r"Files \(\d+\)\.ZIP", f)]
+            if matching_downloads:
+                candidate_path = os.path.join(self.download_folder_temp, matching_downloads[0])
+                size1 = os.path.getsize(candidate_path)
+                if size1 > 0:
+                    time.sleep(stable_wait)
+                    size2 = os.path.getsize(candidate_path)
+                    if size2 == size1:
+                        # Non-zero and stable — download is complete
+                        candidate = candidate_path
+                        break
+            time.sleep(2)
 
-        else:
+        if candidate is None:
             print(f"file containing range {r} was not downloaded")
             raise DownloadFailedException
+
+        print("Download completed!")
+        nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
+        os.rename(candidate, nexis_scraper_download_path)
+        print(f"moving file to {nexis_scraper_download_path}")
 
     def wait_for_box_sync(self, file_path, max_wait=30):
         """Wait for file to be fully synced to Box Drive"""
