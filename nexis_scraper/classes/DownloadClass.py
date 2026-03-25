@@ -596,28 +596,22 @@ class Download(SeleniumBase):
             raise  # Re-raise the unexpected exception
 
     
-    def move_file(self, r, poll_timeout=60):
-        # Poll for the file — the download UI disappearing doesn't guarantee the file
-        # is on disk yet, so we check repeatedly rather than giving up immediately.
-        deadline = time.time() + poll_timeout
-        matching_downloads = []
-        while time.time() < deadline:
-            matching_downloads = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
-            if matching_downloads:
-                break
-            time.sleep(2)
+    def move_file(self, r):
+        # Find files matching Nexis Uni's default download naming pattern "Files (N).ZIP"
+        matching_downloads = [f for f in os.listdir(self.download_folder_temp) if re.match(r"Files \(\d+\)\.ZIP", f)]
 
-        if not matching_downloads:
+        if matching_downloads:
+            print("Download completed!")
+            default_download_path = os.path.join(self.download_folder_temp, matching_downloads[0])
+            nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
+
+            if os.path.isfile(default_download_path):
+                os.rename(default_download_path, nexis_scraper_download_path)
+                print(f"moving file to {nexis_scraper_download_path}")
+
+        else:
             print(f"file containing range {r} was not downloaded")
             raise DownloadFailedException
-
-        print("Download completed!")
-        default_download_path = os.path.join(self.download_folder_temp, matching_downloads[0])
-        nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
-
-        if os.path.isfile(default_download_path):
-            os.rename(default_download_path, nexis_scraper_download_path)
-            print(f"moving file to {nexis_scraper_download_path}")
 
     def wait_for_box_sync(self, file_path, max_wait=30):
         """Wait for file to be fully synced to Box Drive"""
