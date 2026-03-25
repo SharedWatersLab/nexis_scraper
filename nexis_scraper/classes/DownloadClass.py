@@ -166,7 +166,8 @@ class Download(SeleniumBase):
             if not found_popup:
                 break
         
-        print(f"Total popups closed: {popups_closed}")
+        if popups_closed > 0:
+            print(f"Total popups closed: {popups_closed}")
         return popups_closed
     
     def sort_by_date(self):
@@ -204,12 +205,10 @@ class Download(SeleniumBase):
                 continue
                 
             except ElementClickInterceptedException:
-                print("Popup is in the way, attempting to close it")
                 self.handle_popups()
                 continue
-                
+
             except ElementNotInteractableException:
-                print("Element not interactable, attempting to close popup if present")
                 self.handle_popups()
                 continue
         
