@@ -159,7 +159,7 @@ class Download(SeleniumBase):
                     if found_popup:
                         break  # Break the outer loop to restart from the beginning
                         
-                except Exception as e:
+                except Exception:
                     continue
             
             # If no popup was found and closed, we're done
@@ -449,8 +449,8 @@ class Download(SeleniumBase):
             """
             result = self.driver.execute_script(script)
             return result
-        except Exception as e:
-            print(f"Error checking for download limit banner")
+        except Exception:
+            print("Error checking for download limit banner")
             return {"found": False}
 
 
