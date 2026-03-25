@@ -1,13 +1,11 @@
 from nexis_scraper.classes.LoginClass import PasswordManager, WebDriverManager, Login
 from nexis_scraper.classes.DownloadClass import Download, DownloadFailedException
 from nexis_scraper.classes.SearchClass import Search
-from selenium.common.exceptions import SessionNotCreatedException, TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 import os
 import time
 from tqdm import tqdm
-
-import download_driver
 
 # Date range for all Nexis Uni queries — update END_DATE when new data is needed
 START_DATE = '06/30/2008'

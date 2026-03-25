@@ -83,6 +83,7 @@ class WebDriverManager:
     def start_driver(self):
         if not self.driver:
             self.driver = webdriver.Firefox(service=self.service, options=self.options)
+            self.driver.maximize_window()
         return self.driver
 
     def stop_driver(self):
