@@ -1,9 +1,9 @@
 from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.keys import Keys 
+from webdriver_manager.firefox import GeckoDriverManager
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
@@ -17,9 +17,6 @@ import pandas as pd
 import time
 import getpass
 
-import tempfile
-import uuid
-
 # this all just to get the paths correct for the imports
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +24,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 from classes.BaseClass import SeleniumBase
+
 
 class PasswordManager:
     def __init__(self):
@@ -41,47 +39,51 @@ class PasswordManager:
         # Return the stored password
         return self.password
 
+
 class WebDriverManager:
+    """Manages a Firefox/GeckoDriver WebDriver instance.
+
+    Firefox is used here instead of Chrome because:
+    - GeckoDriver has a smaller automation footprint (less detectable)
+    - Firefox doesn't have Chrome's Bounce Tracking Mitigation feature
+    - dom.webdriver.enabled = False effectively hides the automation signal
+    GeckoDriver is managed automatically by webdriver_manager (no manual
+    driver downloads needed).
+    """
+
     def __init__(self):
         self.driver = None
-        self.options = ChromeOptions()
+        self.options = FirefoxOptions()
         self.setup_options()
-        
-        # Use webdriver_manager for automatic driver version management
-        driver_path = ChromeDriverManager().install()
-        self.service = Service(driver_path)
-    
+        # GeckoDriverManager auto-downloads the correct geckodriver version
+        self.service = FirefoxService(GeckoDriverManager().install())
+
     def setup_options(self):
-        self.options = webdriver.ChromeOptions()
-        self.options.page_load_strategy = 'normal'
-        self.options.add_argument("--start-maximized")
-        #self.options.add_argument("user-data-dir=/tmp/storedLoginInformation")  
-            
-        temp_dir = tempfile.mkdtemp(prefix=f"chrome_profile_{uuid.uuid4().hex[:8]}_")
-        self.options.add_argument(f"user-data-dir={temp_dir}")
+        self.options = FirefoxOptions()
+        self.options.page_load_strategy = "normal"
 
-        # disable GCM/push notifications
-        self.options.add_argument("--disable-background-networking")
-        self.options.add_argument("--disable-background-timer-throttling")
-        self.options.add_argument("--disable-backgrounding-occluded-windows")
-        self.options.add_argument("--disable-push-messaging")
-        self.options.add_argument("--disable-notifications")
+        # Hide Selenium automation signals — Firefox checks dom.webdriver.enabled
+        self.options.set_preference("dom.webdriver.enabled", False)
+        self.options.set_preference("useAutomationExtension", False)
 
-        self.options.add_argument("--disable-logging")
-        self.options.add_argument("--log-level=3")  # Only fatal errors
+        # Suppress save/open dialogs for ZIP files — download silently to ~/Downloads
+        self.options.set_preference("browser.download.folderList", 1)  # 1 = ~/Downloads
+        self.options.set_preference("browser.download.manager.showWhenStarting", False)
+        self.options.set_preference("browser.download.manager.focusWhenStarting", False)
+        self.options.set_preference("browser.download.manager.useWindow", False)
+        self.options.set_preference(
+            "browser.helperApps.neverAsk.saveToDisk",
+            "application/zip,application/x-zip-compressed,application/octet-stream"
+        )
 
-        # disable bounce tracking protection
-        self.options.add_argument('--disable-blink-features=AutomationControlled')
-        self.options.add_argument('--disable-features=BounceTrackingMitigations')
-        self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        self.options.add_experimental_option('useAutomationExtension', False)
+        # Suppress notification/push permission prompts
+        self.options.set_preference("dom.push.enabled", False)
+        self.options.set_preference("dom.webnotifications.enabled", False)
 
-        prefs = {'download.prompt_for_download': False}
-        self.options.add_experimental_option('prefs', prefs)   
-    
     def start_driver(self):
         if not self.driver:
-            self.driver = webdriver.Chrome(service=self.service, options=self.options)
+            self.driver = webdriver.Firefox(service=self.service, options=self.options)
+            self.driver.maximize_window()
         return self.driver
 
     def stop_driver(self):

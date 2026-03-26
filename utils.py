@@ -1,13 +1,11 @@
 from nexis_scraper.classes.LoginClass import PasswordManager, WebDriverManager, Login
 from nexis_scraper.classes.DownloadClass import Download, DownloadFailedException
 from nexis_scraper.classes.SearchClass import Search
-from selenium.common.exceptions import SessionNotCreatedException, TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 import os
 import time
 from tqdm import tqdm
-
-import download_driver
 
 # Date range for all Nexis Uni queries — update END_DATE when new data is needed
 START_DATE = '06/30/2008'
@@ -84,15 +82,13 @@ def _get_or_cache_password():
 
 
 def _start_driver():
-    """Start the Chrome WebDriver, auto-updating ChromeDriver if the version is mismatched."""
+    """Start the Firefox WebDriver.
+
+    GeckoDriverManager (used by WebDriverManager) auto-downloads and caches the
+    correct geckodriver version, so no manual driver update step is needed.
+    """
     manager = WebDriverManager()
-    try:
-        driver = manager.start_driver()
-    except SessionNotCreatedException:
-        print("Session not created, updating driver...")
-        download_driver.main()
-        time.sleep(2)
-        driver = manager.start_driver()
+    driver = manager.start_driver()
     return manager, driver
 
 
@@ -125,11 +121,12 @@ def _run_download_loop(download, login, search, basin_code, download_folder, pba
 
         for i, r in enumerate(ranges_to_download):
             try:
+                prev_r = ranges_to_download[i - 1] if i > 0 else None
                 if i > 0:
                     # Re-login and re-run search between ranges to keep the session fresh
                     reset(download, login, search)
 
-                download.check_clear_downloads(r)
+                download.check_clear_downloads(r, prev_r=prev_r)
                 try:
                     download.download_dialog(r)
                 except TimeoutException as te:
