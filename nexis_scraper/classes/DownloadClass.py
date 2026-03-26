@@ -627,7 +627,7 @@ class Download(SeleniumBase):
 
         print("Download completed!")
         nexis_scraper_download_path = os.path.join(self.download_folder, f"{self.basin_code}_results_{r}.ZIP")
-        os.rename(candidate, nexis_scraper_download_path)
+        os.replace(candidate, nexis_scraper_download_path)
         print(f"moving file to {nexis_scraper_download_path}")
 
     def wait_for_box_sync(self, file_path, max_wait=30):
