@@ -42,7 +42,10 @@ class SeleniumBase:
         element = WebDriverWait(self.driver, self.timeout).until(
             EC.element_to_be_clickable((By.XPATH, xpath))
         )
-        self.driver.execute_script("arguments[0].scrollIntoView();", element)
+        # focus() explicitly moves browser focus to this element before typing.
+        # Firefox (unlike Chrome) routes keyboard events to the currently focused
+        # element, so without this the keys can land in the previously active field.
+        self.driver.execute_script("arguments[0].scrollIntoView(); arguments[0].focus();", element)
         element.send_keys(keys)
 
     def _is_element_present_css(self, css_selector):
