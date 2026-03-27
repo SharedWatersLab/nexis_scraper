@@ -25,7 +25,7 @@ class SeleniumBase:
 
     def _send_keys_from_css(self, css_selector, keys):
         element = WebDriverWait(self.driver, self.timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
+            EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector))
         )
         element.send_keys(keys)
 
