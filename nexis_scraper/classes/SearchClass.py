@@ -16,7 +16,9 @@ from classes.BaseClass import SeleniumBase
 
 class Search(SeleniumBase):
 
-    BOX3_LIMIT = 1900  # Max characters for search box 3 (Nexis Uni search field limit)
+    # Nexis Uni rejects searches above ~2500 total chars with a "simplify" error.
+    # 2400 gives a small safety buffer.
+    MAX_TOTAL_SEARCH_STRING = 2400
 
     def __init__(self, driver: webdriver, basin_code, username, nexis_scraper_folder, timeout=20, url=None):
         self.driver = driver
@@ -43,9 +45,9 @@ class Search(SeleniumBase):
         #   box_4: exclusion terms — false-positive water references to filter out
         self.box_1_keys = 'water* OR river* OR lake* OR dam* OR stream OR streams OR tributar* OR irrigat* OR flood* OR drought* OR canal* OR hydroelect* OR reservoir* OR groundwater* OR aquifer* OR riparian* OR pond* OR wadi* OR creek* OR oas*s OR spring*'
         self.box_2_keys = 'treaty OR treaties OR agree* OR negotiat* OR mediat* OR resolv* OR facilitat* OR resolution OR commission* OR council* OR dialog* OR meet* OR discuss* OR secretariat* OR manag* OR peace* OR accord OR settle* OR cooperat* OR collaborat* OR diplomacy OR diplomat* OR statement OR “memo” OR “memos” OR memorand* OR convers* OR convene* OR convention* OR declar* OR allocat*OR share*OR sharing OR apportion* OR distribut* OR ration* OR administ* OR trade* OR trading OR communicat* OR notif* OR trust* OR distrust* OR mistrust*OR support* OR relations* OR consult* OR alliance* OR ally OR allies OR compensat* OR disput* OR conflict* OR disagree* OR sanction* OR war* OR troop* OR skirmish OR hostil* OR attack* OR violen* OR boycott* OR protest* OR clash* OR appeal* OR intent* OR reject* OR threat* OR forc* OR coerc* OR assault* OR fight OR demand* OR disapprov*  OR bomb* OR terror* OR assail* OR insurg* OR counterinsurg* OR destr* OR agitat* OR aggrav* OR veto* OR ban* OR exclud* OR prohibit* OR withdraw* OR suspect* OR combat* OR milit* OR refus* OR deteriorat* OR spurn* OR invad* OR invasion* OR blockad* OR debat* OR refugee* OR migrant* OR violat*'
-        self.box_3_keys = self.search_term
-        self.box_3_keys = self._truncate_box3()  # Truncate to BOX3_LIMIT if needed
         self.box_4_keys = 'ocean* OR “bilge water” OR “flood of refugees” OR waterproof OR “water resistant” OR streaming OR streame*'
+        self.box_3_keys = self.search_term
+        self.box_3_keys = self._truncate_box3()  # Truncate box 3 to fit within MAX_TOTAL_SEARCH_STRING
 
     def NexisHome(self):
         try:
@@ -79,29 +81,33 @@ class Search(SeleniumBase):
         print("Initializing search for " + self.basin_code)
         #print(f"Initializing search for {row['Basin_Name']})
 
+    def _box3_budget(self, extra_terms_len=0):
+        """How many chars box 3 can use without exceeding MAX_TOTAL_SEARCH_STRING.
+
+        The full search string template is:
+          hlead(b1) and hlead(b2) and hlead(b3) [and hlead(extra)] and not hlead(b4)
+        Overhead for the default (4-box) template is 47 chars; each additional box
+        (e.g. riparian) adds 12 chars for the extra ') and hlead(' connector.
+        """
+        overhead = 47 + (12 if extra_terms_len > 0 else 0)
+        fixed = len(self.box_1_keys) + len(self.box_2_keys) + len(self.box_4_keys) + extra_terms_len + overhead
+        return self.MAX_TOTAL_SEARCH_STRING - fixed
+
+    def _truncate_to_budget(self, terms, budget):
+        """Truncate terms to fit within budget chars, cutting at the last OR boundary."""
+        if len(terms) <= budget:
+            return terms
+        truncated = terms[:budget]
+        last_or = truncated.rfind(" OR ")
+        result = terms[:last_or] if last_or != -1 else truncated
+        print(f"Box 3 truncated: {len(terms)} → {len(result)} chars (budget: {budget})")
+        return result
+
     def _truncate_box3(self):
-        """Truncate box 3 terms if they exceed BOX3_LIMIT"""
-        # Only apply this for non-riparian searches
-        # Riparian searches will handle their own truncation
+        """Truncate box 3 to fit within the available budget for the default search."""
         if self.use_riparian:
-            return self.box_3_keys  # Don't pre-truncate for riparian
-        
-        if len(self.box_3_keys) <= self.BOX3_LIMIT:
-            return self.box_3_keys
-        
-        truncated = self.box_3_keys[:self.BOX3_LIMIT]
-        last_or_pos = truncated.rfind(" OR ")
-        
-        if last_or_pos == -1:
-            return truncated
-        
-        final_truncated = self.box_3_keys[:last_or_pos]
-        
-        if len(self.box_3_keys) > self.BOX3_LIMIT:
-            chars_removed = len(self.box_3_keys) - len(final_truncated)
-            print(f"Box 3 truncated for default search: removed {chars_removed} chars")
-        
-        return final_truncated
+            return self.box_3_keys  # riparian_search handles its own truncation
+        return self._truncate_to_budget(self.box_3_keys, self._box3_budget())
     
     def riparian_search(self):
         """Build a narrower search string that includes riparian country names.
@@ -110,44 +116,19 @@ class Search(SeleniumBase):
         efficiently. By adding country names (e.g. 'Egypt OR Sudan OR Ethiopia') the
         result set is narrowed to articles that explicitly mention the relevant nations.
 
-        BOX3_LIMIT governs the total character budget shared between the basin-specific
-        terms (box 3) and the country names — box 3 is truncated if needed to make room.
+        Box 3 is truncated to whatever budget remains after accounting for the riparian
+        terms and all other fixed content, keeping the total under MAX_TOTAL_SEARCH_STRING.
         """
-        riparian_country_terms = self.row['Riparian_country_term'].values[0]
-        box_5_keys = riparian_country_terms
-        
-        # Check if box_3 + box_5 fit within our flexible space limit
-        flexible_space_used = len(self.box_3_keys) + len(box_5_keys)
-        
-        if flexible_space_used <= self.BOX3_LIMIT:
-            # Both fit, use them as-is
-            print("box 3 and riparian terms fit within limit")
-            string_with_country_names = 'hlead(' + self.box_1_keys + ') and hlead(' + self.box_2_keys + ') and hlead(' + self.box_3_keys + ') and hlead(' + box_5_keys + ') and not hlead(' + self.box_4_keys + ')'
-            return string_with_country_names
-        else:
-            # Need to truncate box_3 to make room for box_5
-            print("box 3 + riparian terms exceed limit, truncating box 3")
-            
-            # Calculate new limit for box_3: total flexible space minus what box_5 needs
-            new_box3_limit = self.BOX3_LIMIT - len(box_5_keys)
-            
-            if new_box3_limit < 0:
-                print("WARNING: riparian terms alone exceed BOX3_LIMIT!")
-                new_box3_limit = 0
-            
-            # Truncate box_3 to the new limit
-            box3_truncated = self.box_3_keys[:new_box3_limit]
-            last_or_pos = box3_truncated.rfind(" OR ")
-            
-            if last_or_pos == -1:
-                new_box_3_keys = box3_truncated
-            else:
-                new_box_3_keys = self.box_3_keys[:last_or_pos]
-            
-            truncated_riparian_string = 'hlead(' + self.box_1_keys + ') and hlead(' + self.box_2_keys + ') and hlead(' + new_box_3_keys + ') and hlead(' + box_5_keys + ') and not hlead(' + self.box_4_keys + ')'
-            
-            print(f"box 3 truncated for riparian: {len(self.box_3_keys)} → {len(new_box_3_keys)} chars to make room for {len(box_5_keys)} char riparian terms")
-            return truncated_riparian_string
+        box_5_keys = self.row['Riparian_country_term'].values[0]
+        budget = self._box3_budget(extra_terms_len=len(box_5_keys))
+        box_3_truncated = self._truncate_to_budget(self.box_3_keys, budget)
+        return (
+            'hlead(' + self.box_1_keys + ')'
+            + ' and hlead(' + self.box_2_keys + ')'
+            + ' and hlead(' + box_3_truncated + ')'
+            + ' and hlead(' + box_5_keys + ')'
+            + ' and not hlead(' + self.box_4_keys + ')'
+        )
 
     def default_search(self):
         default_string = 'hlead(' + self.box_1_keys + ') and hlead(' + self.box_2_keys + ') and hlead(' + self.box_3_keys + ') and not hlead(' + self.box_4_keys + ')'
