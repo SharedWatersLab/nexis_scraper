@@ -64,21 +64,27 @@ def _ensure_download_folder(download_folder, basin_code):
 
 
 def _get_or_cache_password():
-    """Return the user's password, prompting once and caching for the session."""
+    """Return the user's password, prompting once and caching for the session.
+
+    Checks NEXIS_PASSWORD environment variable first — if set, no prompt needed.
+    Set it once per terminal session with: export NEXIS_PASSWORD=yourpassword
+    """
     global _password_cache
     if _password_cache is None:
-        pm = PasswordManager()
-        if not pm.password:
-            print("No password found, please enter your password")
-            password = pm.get_password()
-            print("Password saved successfully")
+        env_password = os.environ.get("NEXIS_PASSWORD")
+        if env_password:
+            print("Using password from environment variable")
+            _password_cache = env_password
         else:
-            password = pm.password
-        _password_cache = password
-    else:
-        password = _password_cache
-        print("Using cached password")
-    return password
+            pm = PasswordManager()
+            if not pm.password:
+                print("No password found, please enter your password")
+                password = pm.get_password()
+                print("Password saved successfully")
+            else:
+                password = pm.password
+            _password_cache = password
+    return _password_cache
 
 
 def _start_driver():
