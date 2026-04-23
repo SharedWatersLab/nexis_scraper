@@ -168,7 +168,10 @@ def _run_download_loop(download, login, search, basin_code, download_folder, pba
             except DownloadFailedException:
                 consecutive_failures += 1
                 print(f"Download failed for range {r} ({consecutive_failures} consecutive failure(s))")
-                reset(download, login, search)
+                try:
+                    reset(download, login, search)
+                except Exception:
+                    pass  # If reset itself fails, let the failure counter handle it
 
                 if consecutive_failures >= failure_threshold:
                     print(f"{basin_code} downloads failed {failure_threshold} times in a row, please try another basin")
@@ -234,7 +237,7 @@ def full_process(basin_code, username, paths):
     time.sleep(5)
     try:
         download.DownloadSetup()
-    except (TimeoutException, NoSuchElementException):
+    except (TimeoutException, NoSuchElementException, DownloadFailedException):
         check_count = download.get_result_count()
         if check_count is None:
             zero_txt = os.path.join(download_folder, 'noresults.txt')

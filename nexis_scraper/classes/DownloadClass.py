@@ -171,39 +171,34 @@ class Download(SeleniumBase):
         return popups_closed
     
     def sort_by_date(self):
+        """Attempt to sort results by date (oldest-newest). Returns True on success, False on failure."""
         sortby_dropdown_css = '#select'
         oldestnewest_option_text = 'Date (oldest-newest)'
 
-        for attempt in range(3):  # Try up to 3 times
+        for attempt in range(3):
             try:
-                # Check for and close popup before interacting with dropdown
                 self.handle_popups()
 
-                # Wait for the dropdown to be clickable
                 dropdown = WebDriverWait(self.driver, 20).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, sortby_dropdown_css))
                 )
-                
-                # Use Select class to interact with the dropdown
+
                 select = Select(dropdown)
                 select.select_by_visible_text(oldestnewest_option_text)
-                
                 print("Selected 'Date (oldest-newest)' option")
-                time.sleep(5)  # Wait for the page to update
+                time.sleep(5)
+                return True
 
-                return  # Success, exit the function
-                
             except StaleElementReferenceException:
-                print("Stale element, retrying...")
                 time.sleep(2)
                 continue
-                
+
             except (TimeoutException, NoSuchElementException):
                 print(f"Attempt {attempt + 1}: Can't find sort-by dropdown, refreshing the page")
                 self.driver.refresh()
                 time.sleep(5)
                 continue
-                
+
             except ElementClickInterceptedException:
                 self.handle_popups()
                 continue
@@ -211,12 +206,14 @@ class Download(SeleniumBase):
             except ElementNotInteractableException:
                 self.handle_popups()
                 continue
-        
+
         print("Failed to sort by date after multiple attempts")
+        return False
 
     def DownloadSetup(self):
         self.group_duplicates()
-        self.sort_by_date()
+        if not self.sort_by_date():
+            raise DownloadFailedException("Sort by date failed — results are not in chronological order")
 
     # Nexis Uni stores result count in data-actualresultscount on the active content-type tab.
     # The attribute name sometimes has leading/trailing spaces (website inconsistency).

@@ -71,6 +71,7 @@ class WebDriverManager:
         self.options.set_preference("browser.download.manager.showWhenStarting", False)
         self.options.set_preference("browser.download.manager.focusWhenStarting", False)
         self.options.set_preference("browser.download.manager.useWindow", False)
+        self.options.set_preference("browser.download.alwaysOpenPanel", False)  # suppress toolbar download panel
         self.options.set_preference(
             "browser.helperApps.neverAsk.saveToDisk",
             "application/zip,application/x-zip-compressed,application/octet-stream"
@@ -128,6 +129,7 @@ class Login(SeleniumBase):
     def _init_login(self):
         
         loggedin_home = 'https://login.libdata.lib.ua.edu/login?qurl=http%3a%2f%2fwww.nexisuni.com'
+        #loggedin_home = 'https://advance.lexis.com/bisnexishome/?pdmfid=1519360&crid=9cf344ba-51d0-4986-975d-4fbaaabdc17b'
         self.driver.get(self.url or loggedin_home)
         time.sleep(5)
         
