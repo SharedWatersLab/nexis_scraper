@@ -93,10 +93,16 @@ class WebDriverManager:
             self.options.set_preference("startup.homepage_welcome_url", "")
             self.options.set_preference("startup.homepage_welcome_url.additional", "about:blank")
             self.options.set_preference("browser.startup.firstrunSkipsHomepage", True)
-            # Explicitly point to Firefox binary since it is not on PATH on Windows
-            ff_path = r"C:\Program Files\Mozilla Firefox\firefox.exe"
-            if os.path.exists(ff_path):
-                self.options.binary_location = ff_path
+            # Explicitly point to Firefox binary since it is not on PATH on Windows.
+            # Check both 64-bit and 32-bit install locations; fall back to Selenium's
+            # own search if neither is found (e.g. custom install directory).
+            for ff_path in (
+                r"C:\Program Files\Mozilla Firefox\firefox.exe",
+                r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+            ):
+                if os.path.exists(ff_path):
+                    self.options.binary_location = ff_path
+                    break
 
     def start_driver(self):
         if not self.driver:
