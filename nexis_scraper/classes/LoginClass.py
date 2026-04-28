@@ -13,6 +13,7 @@ from selenium.common.exceptions import ElementNotInteractableException
 
 import os
 import sys
+import platform
 import pandas as pd
 import time
 import getpass
@@ -67,7 +68,9 @@ class WebDriverManager:
         self.options.set_preference("useAutomationExtension", False)
 
         # Suppress save/open dialogs for ZIP files — download silently to ~/Downloads
-        self.options.set_preference("browser.download.folderList", 1)  # 1 = ~/Downloads
+        download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        self.options.set_preference("browser.download.folderList", 2)  # 2 = custom dir
+        self.options.set_preference("browser.download.dir", download_dir)
         self.options.set_preference("browser.download.manager.showWhenStarting", False)
         self.options.set_preference("browser.download.manager.focusWhenStarting", False)
         self.options.set_preference("browser.download.manager.useWindow", False)
@@ -80,6 +83,20 @@ class WebDriverManager:
         # Suppress notification/push permission prompts
         self.options.set_preference("dom.push.enabled", False)
         self.options.set_preference("dom.webnotifications.enabled", False)
+
+        if platform.system() == "Windows":
+            # Suppress first-run welcome pages and default-browser prompts that
+            # appear on a fresh Firefox profile on Windows and block automation
+            self.options.set_preference("browser.startup.homepage", "about:blank")
+            self.options.set_preference("browser.startup.page", 0)
+            self.options.set_preference("browser.shell.checkDefaultBrowser", False)
+            self.options.set_preference("startup.homepage_welcome_url", "")
+            self.options.set_preference("startup.homepage_welcome_url.additional", "about:blank")
+            self.options.set_preference("browser.startup.firstrunSkipsHomepage", True)
+            # Explicitly point to Firefox binary since it is not on PATH on Windows
+            ff_path = r"C:\Program Files\Mozilla Firefox\firefox.exe"
+            if os.path.exists(ff_path):
+                self.options.binary_location = ff_path
 
     def start_driver(self):
         if not self.driver:

@@ -605,7 +605,7 @@ class Download(SeleniumBase):
 
         while time.time() < deadline:
             matching_downloads = [f for f in os.listdir(self.download_folder_temp)
-                                  if re.match(r"Files \(\d+\)\.ZIP", f)]
+                                  if re.match(r"Files \(\d+\)\.ZIP", f, re.IGNORECASE)]
             if matching_downloads:
                 candidate_path = os.path.join(self.download_folder_temp, matching_downloads[0])
                 size1 = os.path.getsize(candidate_path)
@@ -652,7 +652,7 @@ class Download(SeleniumBase):
         sorted correctly instead of being discarded to the unsorted folder.
         """
         default_download_pattern = r"Files \(\d+\)\.ZIP"
-        matching_files = [f for f in os.listdir(self.download_folder_temp) if re.match(default_download_pattern, f)]
+        matching_files = [f for f in os.listdir(self.download_folder_temp) if re.match(default_download_pattern, f, re.IGNORECASE)]
 
         if not matching_files:
             return
