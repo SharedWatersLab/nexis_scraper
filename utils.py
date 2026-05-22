@@ -7,9 +7,18 @@ import os
 import time
 from tqdm import tqdm
 
-# Date range for all Nexis Uni queries — update END_DATE when new data is needed
-START_DATE = '06/30/2008'
-END_DATE = '04/30/2025'
+# Default date range for all Nexis Uni queries — update END_DATE when new data is needed
+DEFAULT_START_DATE = '06/30/2008'
+DEFAULT_END_DATE = '04/30/2025'
+
+
+def _year_label(start_date, end_date):
+    """Return 'YYYY-YYYY' subfolder label, or None when using the full default range."""
+    if start_date == DEFAULT_START_DATE and end_date == DEFAULT_END_DATE:
+        return None
+    start_year = start_date.split('/')[-1]
+    end_year = end_date.split('/')[-1]
+    return f"{start_year}-{end_year}"
 
 _password_cache = None
 
@@ -44,12 +53,12 @@ def logout_clearcookies(download):
     print("deleting cookies")
 
 
-def reset(download, login, search):
+def reset(download, login, search, start_date, end_date):
     """Re-login and re-run search to refresh the session between download ranges."""
     logout_clearcookies(download)
     time.sleep(3)
     login._init_login()
-    search.search_process(START_DATE, END_DATE)
+    search.search_process(start_date, end_date)
     time.sleep(5)
     download.DownloadSetup()
 
@@ -98,7 +107,7 @@ def _start_driver():
     return manager, driver
 
 
-def _run_download_loop(download, login, search, basin_code, download_folder, pbar):
+def _run_download_loop(download, login, search, basin_code, download_folder, pbar, start_date, end_date):
     """Execute the main per-range download loop for a single basin.
 
     For each pending range:
@@ -130,7 +139,7 @@ def _run_download_loop(download, login, search, basin_code, download_folder, pba
                 prev_r = ranges_to_download[i - 1] if i > 0 else None
                 if i > 0:
                     # Re-login and re-run search between ranges to keep the session fresh
-                    reset(download, login, search)
+                    reset(download, login, search, start_date, end_date)
 
                 download.check_clear_downloads(r, prev_r=prev_r)
                 try:
@@ -168,24 +177,23 @@ def _run_download_loop(download, login, search, basin_code, download_folder, pba
             except DownloadFailedException:
                 consecutive_failures += 1
                 print(f"Download failed for range {r} ({consecutive_failures} consecutive failure(s))")
-                try:
-                    reset(download, login, search)
-                except Exception:
-                    pass  # If reset itself fails, let the failure counter handle it
-
                 if consecutive_failures >= failure_threshold:
                     print(f"{basin_code} downloads failed {failure_threshold} times in a row, please try another basin")
                     logout_clearcookies(download)
                     download.driver.close()
                     return
 
+                try:
+                    reset(download, login, search, start_date, end_date)
+                except Exception:
+                    pass  # If reset itself fails, let the failure counter handle it
                 continue
 
             except Exception:
                 continue  # Skip this range and try the next
 
 
-def full_process(basin_code, username, paths):
+def full_process(basin_code, username, paths, start_date=DEFAULT_START_DATE, end_date=DEFAULT_END_DATE):
     """Orchestrate the full download pipeline for a single basin.
 
     Phases:
@@ -199,12 +207,18 @@ def full_process(basin_code, username, paths):
         basin_code: The basin code (e.g. 'NILE', 'GRND') used for folder naming and search terms
         username: UA username from the Streamlit input
         paths: Dict of folder paths produced by get_user()
+        start_date: Search start date string MM/DD/YYYY (default: full-range start)
+        end_date: Search end date string MM/DD/YYYY (default: full-range end)
     """
     print("~" * 27)
     print(f"Starting download for {basin_code}!")
     print("~" * 27)
 
-    download_folder = paths["download_folder"]
+    # When a non-default date range is used, store downloads in a year-range subfolder
+    # so result-range numbers (1-500 etc.) don't collide across separate year runs.
+    base_download_folder = paths["download_folder"]
+    label = _year_label(start_date, end_date)
+    download_folder = os.path.join(base_download_folder, label) if label else base_download_folder
     download_folder_temp = paths["download_folder_temp"]
 
     # Phase 1: Folder setup
@@ -218,7 +232,7 @@ def full_process(basin_code, username, paths):
 
     # Phase 3: Search
     search = Search(driver, basin_code, username, paths["nexis_scraper_folder"])
-    search.search_process(START_DATE, END_DATE)
+    search.search_process(start_date, end_date)
 
     # Phase 4: Download setup
     download = Download(
@@ -254,10 +268,10 @@ def full_process(basin_code, username, paths):
     if download.get_result_count() > 150000 and not getattr(search, 'already_switched_to_riparian', False):
         search.switch_to_riparian()
         search.already_switched_to_riparian = True
-        search.search_process(START_DATE, END_DATE)
+        search.search_process(start_date, end_date)
         download.DownloadSetup()
 
     # Phase 5: Download loop
     initial_ranges = download.get_ranges()
     with tqdm(total=len(initial_ranges), desc=f"Overall Progress on {basin_code}") as pbar:
-        _run_download_loop(download, login, search, basin_code, download_folder, pbar)
+        _run_download_loop(download, login, search, basin_code, download_folder, pbar, start_date, end_date)

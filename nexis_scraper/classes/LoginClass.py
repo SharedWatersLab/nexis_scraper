@@ -107,7 +107,17 @@ class WebDriverManager:
     def start_driver(self):
         if not self.driver:
             self.driver = webdriver.Firefox(service=self.service, options=self.options)
-            self.driver.maximize_window()
+            # Brief pause so Firefox fully initializes its window context before
+            # maximize_window() — without it, a NoSuchWindowException can fire
+            # ("Browsing context has been discarded") on Windows startup race.
+            for attempt in range(3):
+                try:
+                    time.sleep(2)
+                    self.driver.maximize_window()
+                    break
+                except Exception:
+                    if attempt == 2:
+                        pass  # non-fatal — window size doesn't affect scraping
         return self.driver
 
     def stop_driver(self):
