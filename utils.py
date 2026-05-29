@@ -13,12 +13,10 @@ DEFAULT_END_DATE = '04/30/2025'
 
 
 def _year_label(start_date, end_date):
-    """Return 'YYYY-YYYY' subfolder label, or None when using the full default range."""
+    """Return 'MM-DD-YYYY_MM-DD-YYYY' subfolder label, or None when using the full default range."""
     if start_date == DEFAULT_START_DATE and end_date == DEFAULT_END_DATE:
         return None
-    start_year = start_date.split('/')[-1]
-    end_year = end_date.split('/')[-1]
-    return f"{start_year}-{end_year}"
+    return start_date.replace('/', '-') + '_' + end_date.replace('/', '-')
 
 _password_cache = None
 
@@ -63,13 +61,13 @@ def reset(download, login, search, start_date, end_date):
     download.DownloadSetup()
 
 
-def _ensure_download_folder(download_folder, basin_code):
+def _ensure_download_folder(download_folder):
     """Create the basin download folder if it doesn't already exist."""
     if os.path.exists(download_folder):
-        print(f"{basin_code} folder already exists")
+        print(f"{download_folder} already exists")
     else:
         os.makedirs(download_folder, exist_ok=True)
-        print(f"created folder {basin_code}")
+        print(f"created folder {download_folder}")
 
 
 def _get_or_cache_password():
@@ -222,7 +220,7 @@ def full_process(basin_code, username, paths, start_date=DEFAULT_START_DATE, end
     download_folder_temp = paths["download_folder_temp"]
 
     # Phase 1: Folder setup
-    _ensure_download_folder(download_folder, basin_code)
+    _ensure_download_folder(download_folder)
 
     # Phase 2: Authentication
     password = _get_or_cache_password()
