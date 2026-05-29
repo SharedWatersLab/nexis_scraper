@@ -268,8 +268,9 @@ def full_process(basin_code, username, paths, start_date=DEFAULT_START_DATE, end
     if download.get_result_count() > 150000 and not getattr(search, 'already_switched_to_riparian', False):
         search.switch_to_riparian()
         search.already_switched_to_riparian = True
-        search.search_process(start_date, end_date)
-        download.DownloadSetup()
+        if search.use_riparian:
+            search.search_process(start_date, end_date)
+            download.DownloadSetup()
 
     # Phase 5: Download loop
     initial_ranges = download.get_ranges()
