@@ -79,17 +79,59 @@ class Download(SeleniumBase):
         raise ValueError(f"Unable to parse date string: {date_string}")
 
     def group_duplicates(self):
+        """Attempt to group duplicate results. Returns True on success, False on failure.
+
+        Mirrors sort_by_date()'s resilience: proactively closes popups, retries on
+        staleness/timeouts, and re-handles popups if a click gets intercepted — a popup
+        blocking the actions dropdown was silently breaking this before, which produced
+        wrong (non-deduplicated) result counts downstream.
+        """
         # Button text changed from "Actions" to "More" in a Nexis Uni UI update — match by ID only
-        actions_dropdown_xpath = "//button[@id='resultlistactionmenubuttonhc-yk']"
-        time.sleep(5)
-        self._click_from_xpath(actions_dropdown_xpath)
-        time.sleep(5)
+        actions_dropdown_xpath = "//button[@id='resultlistactionmenubuttontc-yk']"
         moderate_button = "//button[contains(@class, 'action') and @data-action='changeduplicates' and @data-value='moderate']"
         high_button = "//button[contains(@class, 'action') and @data-action='changeduplicates' and @data-value='high']"
         duplicates_button = moderate_button # changed this August 2025
-        self._click_from_xpath(duplicates_button)
-        print("group duplicate results")
-        time.sleep(10)
+
+        for attempt in range(3):
+            try:
+                self.handle_popups()
+
+                dropdown = WebDriverWait(self.driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, actions_dropdown_xpath))
+                )
+                dropdown.click()
+                time.sleep(5)
+
+                self.handle_popups()
+
+                button = WebDriverWait(self.driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, duplicates_button))
+                )
+                button.click()
+                print("group duplicate results")
+                time.sleep(10)
+                return True
+
+            except StaleElementReferenceException:
+                time.sleep(2)
+                continue
+
+            except (TimeoutException, NoSuchElementException):
+                print(f"Attempt {attempt + 1}: Can't find duplicates dropdown/button, refreshing the page")
+                self.driver.refresh()
+                time.sleep(5)
+                continue
+
+            except ElementClickInterceptedException:
+                self.handle_popups()
+                continue
+
+            except ElementNotInteractableException:
+                self.handle_popups()
+                continue
+
+        print("Failed to group duplicates after multiple attempts")
+        return False
 
     def handle_popups(self, max_popups=5):
         # Counter to prevent infinite loops
@@ -211,7 +253,8 @@ class Download(SeleniumBase):
         return False
 
     def DownloadSetup(self):
-        self.group_duplicates()
+        if not self.group_duplicates():
+            raise DownloadFailedException("Group duplicates failed — result count would be inflated by duplicates")
         if not self.sort_by_date():
             raise DownloadFailedException("Sort by date failed — results are not in chronological order")
 

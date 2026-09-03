@@ -21,7 +21,9 @@ class SeleniumBase:
             )
             element.click()
         except TimeoutException:
-            raise NoSuchElementException(f"Element with selector '{css_selector}' not found")
+            raise NoSuchElementException(
+                f"Element with selector '{css_selector}' not found (current_url={self.driver.current_url})"
+            )
 
     def _send_keys_from_css(self, css_selector, keys):
         element = WebDriverWait(self.driver, self.timeout).until(
@@ -36,7 +38,9 @@ class SeleniumBase:
             )
             element.click()
         except TimeoutException:
-            raise NoSuchElementException(f"Element with xpath '{xpath}' not found")
+            raise NoSuchElementException(
+                f"Element with xpath '{xpath}' not found (current_url={self.driver.current_url})"
+            )
 
     def _send_keys_from_xpath(self, xpath, keys):
         element = WebDriverWait(self.driver, self.timeout).until(

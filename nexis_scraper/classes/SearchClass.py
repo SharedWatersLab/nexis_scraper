@@ -63,11 +63,20 @@ class Search(SeleniumBase):
         self.nexis_home_substring = 'bisnexishome'
         if self.nexis_home_substring in self.driver.current_url:
             print('already on Nexis Uni home page')
-            pass
         else:
             print("Navigate to Nexis Uni home page")
             self.driver.get("https://login.libdata.lib.ua.edu/login?qurl=http%3a%2f%2fwww.nexisuni.com")
-            time.sleep(3)
+
+        # Wait for the nav's tab-menu container to actually render before returning, instead
+        # of a flat sleep - on the first search after login (already on bisnexishome, no
+        # driver.get() above) the SPA can still be cold-bootstrapping the nav even though the
+        # URL already looks right, which was timing out _init_search()'s News-tab click.
+        try:
+            WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#nexissearchbutton"))
+            )
+        except TimeoutException:
+            print(f"[WARN] Nav menu never appeared; current_url={self.driver.current_url}")
 
     def _init_search(self):
         if self.url:
@@ -77,7 +86,8 @@ class Search(SeleniumBase):
         self._click_from_css(news_button) # click to search in News
         #news_advancedsearch_button = '#wxbhkkk > ul > li:nth-child(1) > button'
         news_advancedsearch_button = '.advancesearch > li:nth-child(1) > button:nth-child(1)'
-        self._click_from_css(news_advancedsearch_button) # click advanced search, PN: NOT WORKING FOR ME
+        self._click_from_xpath("//button[contains(text(), 'Advanced Search')]")  # click advanced search
+        #self._click_from_css(news_advancedsearch_button) # click advanced search, PN: NOT WORKING FOR ME
         self.driver.execute_script("window.scrollTo(0,102)")
         print("Initializing search for " + self.basin_code)
         #print(f"Initializing search for {row['Basin_Name']})
